@@ -795,22 +795,22 @@
       <div class="brand">
         <div class="brand-icon">🏥</div>
         <div>
-          <div class="brand-title">부부한의원<br />스케쥴 관리</div>
-          <div class="brand-subtitle">Doctor Schedule MVP v0.1</div>
+          <div class="brand-title">목포 부부한의원<br />의료진 스케쥴 관리</div>
+          <div class="brand-subtitle">Doctor Schedule Manager v1.0</div>
         </div>
       </div>
 
       <nav class="nav">
         <button class="active" data-tab="schedule">월간 진료표</button>
         <button data-tab="ledger">근태 관리</button>
-        <button data-tab="settings">설정</button>
+        <button data-tab="settings">관리자 설정</button>
       </nav>
     </aside>
 
     <main class="main">
       <div class="topbar">
         <div>
-          <h1>원장님 스케쥴·근태관리 웹앱</h1>
+          <h1>의료진 스케쥴 &amp; 근태관리</h1>
         </div>
         <div class="action-panel">
           <div class="actions">
@@ -967,18 +967,67 @@
       <section id="settings" class="tabs">
         <div class="two-col">
           <div class="card">
-            <h2 class="section-title">원장님 설정</h2>
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px;">
+              <h2 class="section-title" style="margin:0;">진료의 설정</h2>
+              <div class="actions">
+                <button class="btn primary" onclick="openDoctorModal()">진료의 추가</button>
+                <button class="btn" onclick="toggleDoctorManageMode()">수정</button>
+              </div>
+            </div>
             <div id="doctorSettings" class="list"></div>
           </div>
 
           <div class="card">
             <h2 class="section-title">운영 규칙</h2>
-            <div class="field">
-              <label>일별 목표 진료 인원</label>
-              <input id="targetCountInput" class="input" type="number" min="1" value="4" onchange="updateTargetCount()" />
-            </div>
-            <div class="alert yellow">
-              현재 v0.1은 첨부 기본표를 기준으로 매주 같은 패턴을 반복 생성합니다. 대표원장님은 월/수/금 4시, 일반 원장님은 지정된 8/7/6/2시 패턴을 따르고, 공휴일에 진료하는 칸은 2시로 자동 처리합니다.
+            <div class="list">
+              <div class="list-item">
+                <div>
+                  <strong>기본 스케쥴</strong>
+                  <div class="muted">고정스케쥴 표를 기준으로 매주 같은 패턴을 생성합니다. 수동수정된 칸은 고정스케쥴 변경 시 덮어쓰지 않습니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>공휴일·주말</strong>
+                  <div class="muted">공휴일에 원래 근무가 있는 칸은 2시 퇴근으로 자동 반영합니다. 토요일과 일요일도 단축일로 판단합니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>일별 최소 진료 인원</strong>
+                  <div class="muted">기본 기준은 4명입니다. 평일 중 화요일·목요일은 최소 3명 이상이면 정상으로 판단합니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>퇴근 시간 검증</strong>
+                  <div class="muted">공휴일이 아닌 평일에는 8시 퇴근 1명, 7시 퇴근 최소 1명이 있어야 정상으로 봅니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>주간 근무 시간 검증</strong>
+                  <div class="muted">대표원장을 제외한 원장님은 평일 근무일의 퇴근 시간 평균이 7시가 되도록 확인합니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>연차 사용</strong>
+                  <div class="muted">월간 진료표에서 연차사용으로 바꾼 날짜만 근태관리의 사용 내역과 총 사용일수에 반영합니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>1:1 스왑</strong>
+                  <div class="muted">근무 중인 칸에서만 신청할 수 있고, 해당 날짜에 휴무인 원장님만 대상으로 선택할 수 있습니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>저장·이동 보호</strong>
+                  <div class="muted">현재 데이터 저장과 관리자 설정 진입은 비밀번호가 필요합니다. 저장하지 않은 변경이 있을 때 주 이동을 하면 저장 후 이동, 저장하지 않고 이동, 이동 취소 중 선택합니다.</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1076,6 +1125,84 @@
     </div>
   </div>
 
+  <div id="passwordModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="passwordModalTitle">비밀번호 입력</div>
+          <div class="muted" id="passwordModalMessage">비밀번호를 입력해주세요.</div>
+        </div>
+        <button class="close" onclick="cancelPasswordModal()">×</button>
+      </div>
+
+      <div id="passwordModalAlert"></div>
+
+      <div class="field">
+        <label>비밀번호</label>
+        <input id="passwordInput" class="input" type="password" autocomplete="current-password" onkeydown="handlePasswordKeydown(event)" />
+      </div>
+
+      <div class="actions">
+        <button class="btn" onclick="cancelPasswordModal()">취소</button>
+        <button class="btn primary" onclick="confirmPasswordModal()">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="doctorModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">진료의 추가</div>
+          <div class="muted">추가한 진료의는 현재 데이터 저장을 눌러야 최종 저장됩니다.</div>
+        </div>
+        <button class="close" onclick="closeDoctorModal()">×</button>
+      </div>
+
+      <div class="field">
+        <label>이름</label>
+        <input id="newDoctorName" class="input" type="text" />
+      </div>
+
+      <div class="field">
+        <label>입사일</label>
+        <input id="newDoctorJoinedAt" class="input" type="date" />
+      </div>
+
+      <div class="field">
+        <label>주 근무일수</label>
+        <input id="newDoctorWeeklyWorkDays" class="input" type="number" min="1" max="7" value="5" />
+      </div>
+
+      <div class="actions">
+        <button class="btn" onclick="closeDoctorModal()">취소</button>
+        <button class="btn primary" onclick="addDoctorFromModal()">추가</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="doctorEditModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="doctorEditModalTitle">진료의 수정</div>
+          <div class="muted">수정한 내용은 현재 데이터 저장을 눌러야 최종 저장됩니다.</div>
+        </div>
+        <button class="close" onclick="closeDoctorEditModal()">×</button>
+      </div>
+
+      <div class="field">
+        <label>주 근무일수</label>
+        <input id="editDoctorWeeklyWorkDays" class="input" type="number" min="1" max="7" />
+      </div>
+
+      <div class="actions">
+        <button class="btn" onclick="closeDoctorEditModal()">취소</button>
+        <button class="btn primary" onclick="saveDoctorEditModal()">수정</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     const STORAGE_KEY = 'bubu-doctor-schedule-v01'
@@ -1093,6 +1220,13 @@
     const SCHEDULE_DATA_START_DATE = '2026-05-18'
     const DOCTOR_ORDER = ['choi', 'kim-jun', 'kim-young', 'park', 'ahn', 'hwang']
     let pendingNavigationDate = null
+    let pendingPasswordResolver = null
+
+    function normalizeDoctorRole(doctor) {
+      if (doctor.id === 'choi') return '대표원장'
+      if (doctor.id === 'kim-jun') return '총괄진료원장'
+      return '진료원장'
+    }
 
     function sortDoctors(doctors) {
       return [...doctors].sort((a, b) => {
@@ -1260,7 +1394,7 @@
         {
           id: 'kim-jun',
           name: '김준현',
-          role: '일반원장',
+          role: '총괄진료원장',
           joinedAt: '2020-04-20',
           weeklyWorkDays: 5,
           fixedWeekdays: [],
@@ -1271,7 +1405,7 @@
         {
           id: 'kim-young',
           name: '김영윤',
-          role: '일반원장',
+          role: '진료원장',
           joinedAt: '2025-06-02',
           weeklyWorkDays: 5,
           fixedWeekdays: [],
@@ -1282,7 +1416,7 @@
         {
           id: 'park',
           name: '박지현',
-          role: '일반원장',
+          role: '진료원장',
           joinedAt: '2025-06-23',
           weeklyWorkDays: 5,
           fixedWeekdays: [],
@@ -1293,7 +1427,7 @@
         {
           id: 'ahn',
           name: '안태윤',
-          role: '일반원장',
+          role: '진료원장',
           joinedAt: '2026-03-23',
           weeklyWorkDays: 5,
           fixedWeekdays: [],
@@ -1304,7 +1438,7 @@
         {
           id: 'hwang',
           name: '황두호',
-          role: '일반원장',
+          role: '진료원장',
           joinedAt: '2026-05-06',
           weeklyWorkDays: 5,
           fixedWeekdays: [],
@@ -1318,6 +1452,8 @@
       swaps: [],
       extraLeaveAccruals: [],
       weeklyMemos: [],
+      doctorManageMode: false,
+      editingDoctorId: null,
       activeExtraAccrualDoctorId: null,
       selectedShiftId: null,
     }
@@ -1399,7 +1535,13 @@
     state.selectedMonth = getMonthKey(state.viewStartDate)
     state.extraLeaveAccruals = state.extraLeaveAccruals || []
     state.weeklyMemos = state.weeklyMemos || []
+    state.doctorManageMode = false
+    state.editingDoctorId = null
     state.activeExtraAccrualDoctorId = state.activeExtraAccrualDoctorId || null
+    state.doctors = state.doctors.map((doctor) => ({
+      ...doctor,
+      role: normalizeDoctorRole(doctor),
+    }))
 
     if (!state.fixedScheduleTemplate || Object.keys(state.fixedScheduleTemplate).length === 0) {
       state.fixedScheduleTemplate = getDefaultFixedScheduleTemplate()
@@ -1552,7 +1694,7 @@
           state.doctors = sortDoctors(doctorsResult.data.map((doctor) => ({
             id: doctor.doctor_id,
             name: doctor.name,
-            role: doctor.role,
+            role: normalizeDoctorRole({ id: doctor.doctor_id, role: doctor.role }),
             joinedAt: doctor.joined_at || '',
             weeklyWorkDays: Number(doctor.weekly_work_days || (doctor.role === '대표원장' ? 3 : 5)),
             fixedWeekdays: doctor.fixed_weekdays || [],
@@ -1737,6 +1879,32 @@
       }
     }
 
+    async function saveDoctorsToSupabase() {
+      try {
+        const rows = state.doctors.map((doctor) => ({
+          doctor_id: doctor.id,
+          name: doctor.name,
+          role: normalizeDoctorRole(doctor),
+          joined_at: doctor.joinedAt || null,
+          weekly_work_days: Number(doctor.weeklyWorkDays || 5),
+          fixed_weekdays: doctor.fixedWeekdays || [],
+          active: Boolean(doctor.active),
+          leave_earned: Number(doctor.leaveEarned || 0),
+          leave_used: Number(doctor.leaveUsed || 0),
+        }))
+
+        const { error } = await db
+          .from('doctors')
+          .upsert(rows, { onConflict: 'doctor_id' })
+
+        if (error) throw error
+        return true
+      } catch (error) {
+        console.warn('Supabase에 진료의 설정을 저장하지 못했습니다.', error)
+        return false
+      }
+    }
+
     async function saveExtraLeaveAccrualsToSupabase() {
       try {
         const { error } = await db
@@ -1804,6 +1972,59 @@
       renderLastSaveTime()
     }
 
+    function requestPassword({ title = '비밀번호 입력', message = '비밀번호를 입력해주세요.' } = {}) {
+      const modal = document.getElementById('passwordModal')
+      const input = document.getElementById('passwordInput')
+      const alertBox = document.getElementById('passwordModalAlert')
+
+      document.getElementById('passwordModalTitle').textContent = title
+      document.getElementById('passwordModalMessage').textContent = message
+      alertBox.innerHTML = ''
+      input.value = ''
+      modal.classList.add('active')
+
+      setTimeout(() => input.focus(), 0)
+
+      return new Promise((resolve) => {
+        pendingPasswordResolver = resolve
+      })
+    }
+
+    function resolvePasswordModal(value) {
+      const modal = document.getElementById('passwordModal')
+      modal.classList.remove('active')
+
+      if (pendingPasswordResolver) {
+        pendingPasswordResolver(value)
+        pendingPasswordResolver = null
+      }
+    }
+
+    function cancelPasswordModal() {
+      resolvePasswordModal(null)
+    }
+
+    function confirmPasswordModal() {
+      const input = document.getElementById('passwordInput')
+      const alertBox = document.getElementById('passwordModalAlert')
+
+      if (input.value !== SAVE_PASSWORD) {
+        alertBox.innerHTML = `<div class="alert red">비밀번호가 올바르지 않습니다.</div>`
+        input.value = ''
+        input.focus()
+        return
+      }
+
+      resolvePasswordModal(input.value)
+    }
+
+    function handlePasswordKeydown(event) {
+      if (event.key !== 'Enter') return
+
+      event.preventDefault()
+      confirmPasswordModal()
+    }
+
     async function syncNow() {
       setSyncStatus('Supabase 동기화 중...', 'yellow')
 
@@ -1831,14 +2052,12 @@
     }
 
     async function uploadCurrentDataToSupabase() {
-      const password = prompt('현재 데이터를 저장하려면 비밀번호를 입력해주세요.')
+      const password = await requestPassword({
+        title: '현재 데이터 저장',
+        message: '현재 데이터를 저장하려면 비밀번호를 입력해주세요.',
+      })
 
       if (password === null) return false
-
-      if (password !== SAVE_PASSWORD) {
-        alert('비밀번호가 올바르지 않습니다.')
-        return false
-      }
 
       setSyncStatus('Supabase 저장 중...', 'yellow')
 
@@ -1875,14 +2094,15 @@
         shift.date >= SCHEDULE_DATA_START_DATE
       ))
 
-      const [scheduleSaved, fixedScheduleSaved, extraLeaveAccrualsSaved, weeklyMemosSaved] = await Promise.all([
+      const [scheduleSaved, fixedScheduleSaved, doctorsSaved, extraLeaveAccrualsSaved, weeklyMemosSaved] = await Promise.all([
         saveSchedulesToSupabase(schedulesToSave),
         saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate),
+        saveDoctorsToSupabase(),
         saveExtraLeaveAccrualsToSupabase(),
         saveWeeklyMemosToSupabase(),
       ])
 
-      if (scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved) {
+      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved) {
         updateLastSaveTime()
         clearUnsavedChanges()
         setLastSyncedState()
@@ -1891,16 +2111,16 @@
       }
 
       setSyncStatus(
-        scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
-        scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? 'green' : 'red'
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? 'green' : 'red'
       )
 
-      alert(scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
-        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 고정스케쥴, 추가 발생, 메모 데이터를 Supabase에 저장하고 동기화했습니다.`
+      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
+        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 진료의 설정, 고정스케쥴, 추가 발생, 메모 데이터를 Supabase에 저장하고 동기화했습니다.`
         : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
 
-      return scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
+      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
     }
 
     async function resetData() {
@@ -2074,7 +2294,7 @@
       const day = getDayNumber(date)
 
       if (!isPublicHoliday(date) && (day === 2 || day === 4)) {
-        return 2
+        return 3
       }
 
       return 4
@@ -2693,6 +2913,134 @@
       }).join('')
     }
 
+    function createDoctorId() {
+      const baseId = `doctor-${Date.now()}`
+      let id = baseId
+      let index = 1
+
+      while (state.doctors.some((doctor) => doctor.id === id)) {
+        index += 1
+        id = `${baseId}-${index}`
+      }
+
+      return id
+    }
+
+    function ensureDoctorVisibleShifts(doctorId) {
+      const doctor = getDoctor(doctorId)
+      if (!doctor) return
+
+      const visibleDates = getVisibleDates().filter((date) => date >= SCHEDULE_DATA_START_DATE)
+
+      for (const date of visibleDates) {
+        if (getShift(doctorId, date)) continue
+        state.shifts.push(createDefaultShift(doctor, date, getFixedScheduleTemplate()))
+      }
+    }
+
+    function openDoctorModal() {
+      document.getElementById('newDoctorName').value = ''
+      document.getElementById('newDoctorJoinedAt').value = ''
+      document.getElementById('newDoctorWeeklyWorkDays').value = '5'
+      document.getElementById('doctorModal').classList.add('active')
+      setTimeout(() => document.getElementById('newDoctorName').focus(), 0)
+    }
+
+    function closeDoctorModal() {
+      document.getElementById('doctorModal').classList.remove('active')
+    }
+
+    function openDoctorEditModal(doctorId) {
+      const doctor = getDoctor(doctorId)
+      if (!doctor) return
+
+      state.editingDoctorId = doctorId
+      document.getElementById('doctorEditModalTitle').textContent = `${doctor.name} 진료의 수정`
+      document.getElementById('editDoctorWeeklyWorkDays').value = doctor.weeklyWorkDays || 5
+      document.getElementById('doctorEditModal').classList.add('active')
+      setTimeout(() => document.getElementById('editDoctorWeeklyWorkDays').focus(), 0)
+    }
+
+    function closeDoctorEditModal() {
+      document.getElementById('doctorEditModal').classList.remove('active')
+      state.editingDoctorId = null
+    }
+
+    function saveDoctorEditModal() {
+      const doctor = getDoctor(state.editingDoctorId)
+      if (!doctor) return
+
+      const weeklyWorkDays = Number(document.getElementById('editDoctorWeeklyWorkDays').value || 0)
+
+      if (weeklyWorkDays < 1 || weeklyWorkDays > 7) {
+        alert('주 근무일수는 1~7 사이로 입력해주세요.')
+        return
+      }
+
+      doctor.weeklyWorkDays = weeklyWorkDays
+
+      saveState()
+      markUnsavedChanges()
+      closeDoctorEditModal()
+      renderAll()
+    }
+
+    function addDoctorFromModal() {
+      const name = document.getElementById('newDoctorName').value.trim()
+      const joinedAt = document.getElementById('newDoctorJoinedAt').value
+      const weeklyWorkDays = Number(document.getElementById('newDoctorWeeklyWorkDays').value || 5)
+
+      if (!name) {
+        alert('이름을 입력해주세요.')
+        return
+      }
+
+      if (!joinedAt) {
+        alert('입사일을 선택해주세요.')
+        return
+      }
+
+      const doctor = {
+        id: createDoctorId(),
+        name,
+        role: '진료원장',
+        joinedAt,
+        weeklyWorkDays,
+        fixedWeekdays: [],
+        active: true,
+        leaveEarned: 0,
+        leaveUsed: 0,
+      }
+
+      state.doctors.push(doctor)
+      state.fixedScheduleTemplate[doctor.id] = {}
+      ensureDoctorVisibleShifts(doctor.id)
+
+      saveState()
+      markUnsavedChanges()
+      closeDoctorModal()
+      renderAll()
+    }
+
+    function toggleDoctorManageMode() {
+      state.doctorManageMode = !state.doctorManageMode
+      renderSettings()
+    }
+
+    function deleteDoctor(doctorId) {
+      const doctor = getDoctor(doctorId)
+      if (!doctor) return
+
+      if (!confirm(`${doctor.name} 진료의를 삭제하시겠습니까?`)) return
+
+      doctor.active = false
+      state.doctorManageMode = false
+
+      saveState()
+      markUnsavedChanges()
+      renderAll()
+    }
+
     function getFixedScheduleCellClass(value) {
       return value ? 'fixed-status-on' : 'fixed-status-off'
     }
@@ -2866,7 +3214,20 @@
       document.getElementById('swapRequesterDate').focus()
     }
 
-    function showTab(tabId) {
+    async function canOpenAdminSettings() {
+      const password = await requestPassword({
+        title: '관리자 설정',
+        message: '관리자 설정에 들어가려면 비밀번호를 입력해주세요.',
+      })
+
+      return password !== null
+    }
+
+    async function showTab(tabId) {
+      if (tabId === 'settings' && !(await canOpenAdminSettings())) {
+        return
+      }
+
       document.querySelectorAll('.tabs').forEach((tab) => tab.classList.remove('active'))
       document.querySelectorAll('.nav button').forEach((button) => button.classList.remove('active'))
 
@@ -2875,7 +3236,9 @@
     }
 
     document.querySelectorAll('.nav button').forEach((button) => {
-      button.addEventListener('click', () => showTab(button.dataset.tab))
+      button.addEventListener('click', () => {
+        showTab(button.dataset.tab)
+      })
     })
 
     function applyViewStartDate(date) {
@@ -3576,7 +3939,7 @@
 
     function renderSettings() {
       const target = document.getElementById('doctorSettings')
-      target.innerHTML = sortDoctors(state.doctors).map((doctor) => {
+      target.innerHTML = sortDoctors(state.doctors).filter((doctor) => doctor.active).map((doctor) => {
         const fixed = doctor.fixedWeekdays.length
           ? doctor.fixedWeekdays.map((day) => DAY_LABELS[day]).join(', ')
           : '없음'
@@ -3585,14 +3948,19 @@
           <div class="list-item">
             <div>
               <strong>${doctor.name}</strong>
-              <div class="muted">${doctor.role} · 주 ${doctor.weeklyWorkDays}일 · 고정: ${fixed}</div>
+              <span class="muted"> · 입사일 ${doctor.joinedAt || '-'}</span>
+              <div class="muted">${normalizeDoctorRole(doctor)} · 주 ${doctor.weeklyWorkDays}일 · 고정: ${fixed}</div>
             </div>
-            <span class="badge ${doctor.active ? 'green' : 'red'}">${doctor.active ? '재직' : '비활성'}</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span class="badge green">재직</span>
+              ${state.doctorManageMode ? `
+                <button class="btn" onclick="openDoctorEditModal('${doctor.id}')">수정</button>
+                <button class="btn danger" onclick="deleteDoctor('${doctor.id}')">삭제</button>
+              ` : ''}
+            </div>
           </div>
         `
       }).join('')
-
-      document.getElementById('targetCountInput').value = state.targetDoctorCount
     }
 
     function renderAll() {
