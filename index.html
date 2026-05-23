@@ -218,6 +218,12 @@
       justify-content: flex-end;
     }
 
+    .action-panel {
+      display: grid;
+      gap: 6px;
+      justify-items: end;
+    }
+
     .btn {
       border: 1px solid var(--line);
       background: white;
@@ -740,6 +746,12 @@
       color: var(--red);
     }
 
+    .last-save-time {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
     .section-title {
       font-size: 20px;
       font-weight: 900;
@@ -770,6 +782,10 @@
       .actions {
         justify-content: flex-start;
       }
+
+      .action-panel {
+        justify-items: start;
+      }
     }
   </style>
 </head>
@@ -796,10 +812,13 @@
         <div>
           <h1>원장님 스케쥴·근태관리 웹앱</h1>
         </div>
-        <div class="actions">
-          <span id="syncStatus" class="sync-status">로컬 준비</span>
-          <button class="btn" onclick="uploadCurrentDataToSupabase()">현재 데이터 저장</button>
-          <button class="btn" onclick="resetData()">리셋</button>
+        <div class="action-panel">
+          <div class="actions">
+            <span id="syncStatus" class="sync-status">로컬 준비</span>
+            <button class="btn" onclick="uploadCurrentDataToSupabase()">현재 데이터 저장</button>
+            <button class="btn" onclick="resetData()">리셋</button>
+          </div>
+          <div id="lastSaveTime" class="last-save-time">최종 저장 시간 : -</div>
         </div>
       </div>
 
@@ -1039,18 +1058,41 @@
     </div>
   </div>
 
+  <div id="unsavedNavigationModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">변경 내역이 있습니다.</div>
+          <div class="muted">저장하지 않은 변경사항이 있습니다. 이동 방법을 선택해주세요.</div>
+        </div>
+        <button class="close" onclick="cancelPendingNavigation()">×</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" onclick="saveAndContinueNavigation()">저장 후 이동</button>
+        <button class="btn" onclick="continueNavigationWithoutSaving()">저장하지 않고 이동</button>
+        <button class="btn danger" onclick="cancelPendingNavigation()">이동 취소</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     const STORAGE_KEY = 'bubu-doctor-schedule-v01'
     const LAST_SYNC_STORAGE_KEY = 'bubu-doctor-schedule-v01-last-sync'
+    const LAST_SAVE_TIME_KEY = 'bubu-doctor-schedule-v01-last-save-time'
+    const UNSAVED_CHANGES_KEY = 'bubu-doctor-schedule-v01-unsaved-changes'
     const CLEANUP_WRONG_SWAP_2026_05_23_KEY = 'bubu-cleanup-wrong-swap-2026-05-23'
+    const CLEANUP_CURRENT_CHANGE_HISTORY_KEY = 'bubu-cleanup-current-change-history-2026-05-23'
     const SUPABASE_URL = 'https://wfyuxxskwlczoyisdcmy.supabase.co'
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yUeE6ynEpbR3Eq-k3Gv1Ew_1DiaJHjz'
+    const SAVE_PASSWORD = '1910'
     const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
     const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토']
     const SCHEDULE_DATA_START_DATE = '2026-05-18'
     const DOCTOR_ORDER = ['choi', 'kim-jun', 'kim-young', 'park', 'ahn', 'hwang']
+    let pendingNavigationDate = null
 
     function sortDoctors(doctors) {
       return [...doctors].sort((a, b) => {
@@ -1311,7 +1353,16 @@
     }
 
     function markUnsavedChanges() {
+      safeSetItem(UNSAVED_CHANGES_KEY, 'true')
       setSyncStatus('수정됨 · 저장 필요', 'yellow')
+    }
+
+    function clearUnsavedChanges() {
+      safeSetItem(UNSAVED_CHANGES_KEY, 'false')
+    }
+
+    function hasUnsavedChanges() {
+      return safeGetItem(UNSAVED_CHANGES_KEY) === 'true'
     }
 
     function safeGetItem(key) {
@@ -1356,6 +1407,7 @@
 
     lastSyncedState = loadLastSyncedState()
     cleanupWrongSwapHistoryForMay23()
+    cleanupCurrentChangeHistory()
 
     function loadState() {
       const raw = safeGetItem(STORAGE_KEY)
@@ -1396,6 +1448,28 @@
       }
 
       safeSetItem(CLEANUP_WRONG_SWAP_2026_05_23_KEY, 'done')
+    }
+
+    function cleanupCurrentChangeHistory() {
+      if (safeGetItem(CLEANUP_CURRENT_CHANGE_HISTORY_KEY)) return
+
+      const clearSwapHistory = (snapshot) => {
+        if (!snapshot || !Array.isArray(snapshot.swaps)) return false
+        if (snapshot.swaps.length === 0) return false
+
+        snapshot.swaps = []
+        return true
+      }
+
+      const changedState = clearSwapHistory(state)
+      const changedLastSyncedState = clearSwapHistory(lastSyncedState)
+
+      if (changedState) saveState()
+      if (changedLastSyncedState) {
+        safeSetItem(LAST_SYNC_STORAGE_KEY, JSON.stringify(lastSyncedState))
+      }
+
+      safeSetItem(CLEANUP_CURRENT_CHANGE_HISTORY_KEY, 'done')
     }
 
     function hasBeforeScheduleDataStart(dates) {
@@ -1705,6 +1779,31 @@
       target.className = `sync-status ${type}`.trim()
     }
 
+    function formatSaveTime(value) {
+      if (!value) return '-'
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return '-'
+
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hour = String(date.getHours()).padStart(2, '0')
+      const minute = String(date.getMinutes()).padStart(2, '0')
+      return `${year}-${month}-${day} ${hour}:${minute}`
+    }
+
+    function renderLastSaveTime() {
+      const target = document.getElementById('lastSaveTime')
+      if (!target) return
+
+      target.textContent = `최종 저장 시간 : ${formatSaveTime(safeGetItem(LAST_SAVE_TIME_KEY))}`
+    }
+
+    function updateLastSaveTime() {
+      safeSetItem(LAST_SAVE_TIME_KEY, new Date().toISOString())
+      renderLastSaveTime()
+    }
+
     async function syncNow() {
       setSyncStatus('Supabase 동기화 중...', 'yellow')
 
@@ -1732,6 +1831,15 @@
     }
 
     async function uploadCurrentDataToSupabase() {
+      const password = prompt('현재 데이터를 저장하려면 비밀번호를 입력해주세요.')
+
+      if (password === null) return false
+
+      if (password !== SAVE_PASSWORD) {
+        alert('비밀번호가 올바르지 않습니다.')
+        return false
+      }
+
       setSyncStatus('Supabase 저장 중...', 'yellow')
 
       pruneOldLocalSchedules()
@@ -1742,7 +1850,7 @@
         setSyncStatus('5/18 이후만 저장 가능', 'red')
         alert('5/18 이전 데이터는 저장하지 않습니다. 이전 데이터는 구글 시트를 참조해주세요.')
         renderAll()
-        return
+        return false
       }
 
       const visibleMonths = [...new Set(visibleDates.map((date) => getMonthKey(date)))]
@@ -1775,6 +1883,8 @@
       ])
 
       if (scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved) {
+        updateLastSaveTime()
+        clearUnsavedChanges()
         setLastSyncedState()
         await loadDataFromSupabase()
         renderAll()
@@ -1789,6 +1899,8 @@
         ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 고정스케쥴, 추가 발생, 메모 데이터를 Supabase에 저장하고 동기화했습니다.`
         : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
+
+      return scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
     }
 
     async function resetData() {
@@ -1799,6 +1911,7 @@
       if (snapshot) {
         state = cloneState(snapshot)
         saveState()
+        clearUnsavedChanges()
         renderAll()
         setSyncStatus('마지막 저장 지점으로 복원', 'green')
         return
@@ -1808,6 +1921,7 @@
       const loadedFromSupabase = await loadDataFromSupabase()
 
       if (loadedFromSupabase) {
+        clearUnsavedChanges()
         renderAll()
         setSyncStatus('Supabase 복원 완료', 'green')
       } else {
@@ -2102,7 +2216,7 @@
       const weekStartDate = getWeekStartDate(weekDates[0])
       const memos = getWeeklyMemoShifts(weekDates)
       const memoList = memos.length === 0
-        ? '<div class="muted" style="font-size:11px;">-</div>'
+        ? '<div class="muted" style="font-size:11px;text-align:center;">-</div>'
         : `
           <div style="display:grid;gap:4px;font-size:11px;line-height:1.35;">
             ${memos.map((memo) => `
@@ -2118,10 +2232,17 @@
       return `
         ${memoList}
         <div style="display:flex;gap:4px;margin-top:6px;align-items:center;">
-          <input id="weeklyMemoInput-${weekStartDate}" class="input" type="text" placeholder="메모 추가" style="padding:6px 8px;font-size:11px;" />
+          <input id="weeklyMemoInput-${weekStartDate}" class="input" type="text" placeholder="메모 추가" style="padding:6px 8px;font-size:11px;" onkeydown="handleWeeklyMemoKeydown(event, '${weekStartDate}')" />
           <button class="btn" type="button" style="padding:6px 8px;font-size:11px;" onclick="addWeeklyMemo('${weekStartDate}')">+</button>
         </div>
       `
+    }
+
+    function handleWeeklyMemoKeydown(event, weekStartDate) {
+      if (event.key !== 'Enter') return
+
+      event.preventDefault()
+      addWeeklyMemo(weekStartDate)
     }
 
     function addWeeklyMemo(weekStartDate) {
@@ -2757,11 +2878,23 @@
       button.addEventListener('click', () => showTab(button.dataset.tab))
     })
 
-    function setViewStartDate(date) {
+    function applyViewStartDate(date) {
       state.viewStartDate = getWeekStartDate(date)
       state.selectedMonth = getMonthKey(state.viewStartDate)
       saveState()
       initializeApp()
+    }
+
+    function setViewStartDate(date) {
+      const nextViewStartDate = getWeekStartDate(date)
+
+      if (nextViewStartDate !== state.viewStartDate && hasUnsavedChanges()) {
+        pendingNavigationDate = nextViewStartDate
+        document.getElementById('unsavedNavigationModal').classList.add('active')
+        return
+      }
+
+      applyViewStartDate(nextViewStartDate)
     }
 
     function moveWeeks(offsetWeeks) {
@@ -2770,6 +2903,33 @@
 
     function goCurrentWeek() {
       setViewStartDate(getCurrentWeekStart())
+    }
+
+    async function saveAndContinueNavigation() {
+      if (!pendingNavigationDate) return
+
+      const nextDate = pendingNavigationDate
+      const saved = await uploadCurrentDataToSupabase()
+
+      if (!saved) return
+
+      pendingNavigationDate = null
+      document.getElementById('unsavedNavigationModal').classList.remove('active')
+      applyViewStartDate(nextDate)
+    }
+
+    function continueNavigationWithoutSaving() {
+      if (!pendingNavigationDate) return
+
+      const nextDate = pendingNavigationDate
+      pendingNavigationDate = null
+      document.getElementById('unsavedNavigationModal').classList.remove('active')
+      applyViewStartDate(nextDate)
+    }
+
+    function cancelPendingNavigation() {
+      pendingNavigationDate = null
+      document.getElementById('unsavedNavigationModal').classList.remove('active')
     }
 
     function updateTargetCount() {
@@ -3444,6 +3604,7 @@
       renderSwapList()
       renderLedger()
       renderSettings()
+      renderLastSaveTime()
     }
 
     async function fetchPublicHolidays(year) {
