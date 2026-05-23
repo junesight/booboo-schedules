@@ -297,6 +297,19 @@
       flex-wrap: wrap;
     }
 
+    .toolbar-left {
+      flex: 1 1 620px;
+    }
+
+    .week-nav {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      flex: 1 1 520px;
+    }
+
     .field {
       display: grid;
       gap: 6px;
@@ -387,6 +400,22 @@
       border-left: 4px solid #111827 !important;
     }
 
+    .current-week-top {
+      border-top: 4px solid var(--red) !important;
+    }
+
+    .current-week-bottom {
+      border-bottom: 4px solid var(--red) !important;
+    }
+
+    .current-week-start {
+      border-left: 4px solid var(--red) !important;
+    }
+
+    .current-week-end {
+      border-right: 4px solid var(--red) !important;
+    }
+
 
 
     .schedule-day-cell {
@@ -394,7 +423,7 @@
     }
 
     .schedule-day-cell.status-on {
-      background: var(--doctor-bg);
+      background: white;
     }
 
     .schedule-day-cell.status-off {
@@ -414,6 +443,7 @@
       white-space: nowrap;
       word-break: keep-all;
       line-height: 1.2;
+      position: relative;
     }
 
     .cell.work,
@@ -424,6 +454,18 @@
       min-width: 24px;
       font-size: 12px;
       box-shadow: inset 0 0 0 1px var(--doctor-border);
+    }
+
+    .cell.late::after {
+      content: "☾";
+      position: absolute;
+      top: -8px;
+      right: -6px;
+      color: #facc15;
+      font-size: 13px;
+      font-weight: 900;
+      line-height: 1;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.35);
     }
 
     .cell.off {
@@ -613,7 +655,7 @@
     }
 
     .fixed-schedule-table td.fixed-status-on {
-      background: var(--doctor-bg);
+      background: white;
     }
 
     .fixed-schedule-table td.fixed-status-off {
@@ -753,14 +795,11 @@
       <div class="topbar">
         <div>
           <h1>원장님 스케쥴·근태관리 웹앱</h1>
-          <div class="page-description">
-            기본 스케쥴 자동 생성 + 퇴근시간 기반 월간표 + 일별 4명 진료 검증
-          </div>
         </div>
         <div class="actions">
           <span id="syncStatus" class="sync-status">로컬 준비</span>
           <button class="btn" onclick="uploadCurrentDataToSupabase()">현재 데이터 저장</button>
-          <button class="btn" onclick="resetData()">초기화</button>
+          <button class="btn" onclick="resetData()">리셋</button>
         </div>
       </div>
 
@@ -808,10 +847,15 @@
         <div class="card">
           <div class="toolbar">
             <div class="toolbar-left">
-              <strong>4주 진료표</strong>
-              <button class="btn" onclick="moveWeeks(-4)">지난 4주</button>
-              <button class="btn" onclick="goCurrentWeek()">이번주</button>
-              <button class="btn" onclick="moveWeeks(4)">다음 4주</button>
+              <div class="week-nav">
+                <button class="btn" onclick="moveWeeks(-4)">-4주</button>
+                <button class="btn" onclick="moveWeeks(-2)">-2주</button>
+                <button class="btn" onclick="moveWeeks(-1)">-1주</button>
+                <button class="btn" onclick="goCurrentWeek()">이번주</button>
+                <button class="btn" onclick="moveWeeks(1)">+1주</button>
+                <button class="btn" onclick="moveWeeks(2)">+2주</button>
+                <button class="btn" onclick="moveWeeks(4)">+4주</button>
+              </div>
             </div>
             <div class="toolbar-right">
               <button class="btn primary" onclick="openFixedScheduleModal()">고정스케쥴 변경</button>
@@ -945,18 +989,18 @@
           <option value="4">4시 퇴근</option>
           <option value="2">2시 퇴근</option>
           <option value="휴무">휴무</option>
-          <option value="연차">연차</option>
+          <option value="연차사용">연차사용</option>
+          <option value="__swap__">1:1 스왑</option>
         </select>
       </div>
 
-      <div class="field">
-        <label>메모</label>
-        <textarea id="shiftMemo" class="textarea"></textarea>
+      <div id="swapTargetBox" class="field" style="display:none;">
+        <label>스왑 대상</label>
+        <div id="swapTargetList" class="toolbar-left"></div>
       </div>
 
       <div class="actions">
-        <button class="btn" onclick="closeShiftModal()">취소</button>
-        <button class="btn primary" onclick="saveShiftModal()">저장</button>
+        <button class="btn primary" onclick="closeShiftModal()">닫기</button>
       </div>
     </div>
   </div>
@@ -999,6 +1043,7 @@
   <script>
     const STORAGE_KEY = 'bubu-doctor-schedule-v01'
     const LAST_SYNC_STORAGE_KEY = 'bubu-doctor-schedule-v01-last-sync'
+    const CLEANUP_WRONG_SWAP_2026_05_23_KEY = 'bubu-cleanup-wrong-swap-2026-05-23'
     const SUPABASE_URL = 'https://wfyuxxskwlczoyisdcmy.supabase.co'
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yUeE6ynEpbR3Eq-k3Gv1Ew_1DiaJHjz'
     const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
@@ -1229,6 +1274,9 @@
       shifts: [],
       leaves: [],
       swaps: [],
+      extraLeaveAccruals: [],
+      weeklyMemos: [],
+      activeExtraAccrualDoctorId: null,
       selectedShiftId: null,
     }
 
@@ -1298,12 +1346,16 @@
     let state = loadState()
     state.viewStartDate = state.viewStartDate || getCurrentWeekStart()
     state.selectedMonth = getMonthKey(state.viewStartDate)
+    state.extraLeaveAccruals = state.extraLeaveAccruals || []
+    state.weeklyMemos = state.weeklyMemos || []
+    state.activeExtraAccrualDoctorId = state.activeExtraAccrualDoctorId || null
 
     if (!state.fixedScheduleTemplate || Object.keys(state.fixedScheduleTemplate).length === 0) {
       state.fixedScheduleTemplate = getDefaultFixedScheduleTemplate()
     }
 
     lastSyncedState = loadLastSyncedState()
+    cleanupWrongSwapHistoryForMay23()
 
     function loadState() {
       const raw = safeGetItem(STORAGE_KEY)
@@ -1318,6 +1370,32 @@
 
     function saveState() {
       safeSetItem(STORAGE_KEY, JSON.stringify(state))
+    }
+
+    function cleanupWrongSwapHistoryForMay23() {
+      if (safeGetItem(CLEANUP_WRONG_SWAP_2026_05_23_KEY)) return
+
+      const removeMay23Swap = (snapshot) => {
+        if (!snapshot || !Array.isArray(snapshot.swaps)) return false
+
+        const beforeCount = snapshot.swaps.length
+        snapshot.swaps = snapshot.swaps.filter((swap) => (
+          swap.requesterDate !== '2026-05-23' &&
+          swap.partnerDate !== '2026-05-23'
+        ))
+
+        return snapshot.swaps.length !== beforeCount
+      }
+
+      const changedState = removeMay23Swap(state)
+      const changedLastSyncedState = removeMay23Swap(lastSyncedState)
+
+      if (changedState) saveState()
+      if (changedLastSyncedState) {
+        safeSetItem(LAST_SYNC_STORAGE_KEY, JSON.stringify(lastSyncedState))
+      }
+
+      safeSetItem(CLEANUP_WRONG_SWAP_2026_05_23_KEY, 'done')
     }
 
     function hasBeforeScheduleDataStart(dates) {
@@ -1368,15 +1446,22 @@
 
     async function loadDataFromSupabase() {
       try {
+        const visibleDates = getVisibleDates()
+        const scheduleStartDate = visibleDates[0] < SCHEDULE_DATA_START_DATE
+          ? SCHEDULE_DATA_START_DATE
+          : visibleDates[0]
+        const scheduleEndDate = visibleDates[visibleDates.length - 1]
         const [
           doctorsResult,
           schedulesResult,
+          leaveUsageResult,
           holidaysResult,
           fixedSchedulesResult,
           settingsResult,
         ] = await Promise.all([
           db.from('doctors').select('*').order('doctor_id'),
-          db.from('schedules').select('*').gte('date', SCHEDULE_DATA_START_DATE),
+          db.from('schedules').select('*').gte('date', scheduleStartDate).lte('date', scheduleEndDate),
+          db.from('schedules').select('*').gte('date', SCHEDULE_DATA_START_DATE).eq('status', '연차사용'),
           db.from('holidays').select('*'),
           db.from('fixed_schedules').select('*'),
           db.from('settings').select('*'),
@@ -1384,6 +1469,7 @@
 
         if (doctorsResult.error) throw doctorsResult.error
         if (schedulesResult.error) throw schedulesResult.error
+        if (leaveUsageResult.error) throw leaveUsageResult.error
         if (holidaysResult.error) throw holidaysResult.error
         if (fixedSchedulesResult.error) throw fixedSchedulesResult.error
         if (settingsResult.error) throw settingsResult.error
@@ -1403,7 +1489,13 @@
         }
 
         if (Array.isArray(schedulesResult.data)) {
-          state.shifts = schedulesResult.data.map((shift) => ({
+          const loadedRowsById = new Map()
+
+          for (const shift of [...schedulesResult.data, ...(leaveUsageResult.data || [])]) {
+            loadedRowsById.set(shift.id, shift)
+          }
+
+          const loadedShifts = [...loadedRowsById.values()].map((shift) => ({
             id: shift.id,
             doctorId: shift.doctor_id,
             date: shift.date,
@@ -1412,6 +1504,15 @@
             source: shift.source || 'Supabase',
             memo: shift.memo || '',
           }))
+          const loadedShiftIds = new Set(loadedShifts.map((shift) => shift.id))
+
+          state.shifts = [
+            ...state.shifts.filter((shift) => (
+              (shift.date < scheduleStartDate || shift.date > scheduleEndDate) &&
+              !loadedShiftIds.has(shift.id)
+            )),
+            ...loadedShifts,
+          ]
         }
 
         if (Array.isArray(holidaysResult.data)) {
@@ -1439,6 +1540,34 @@
           const targetCountSetting = settingsResult.data.find((item) => item.key === 'targetDoctorCount')
           if (targetCountSetting) {
             state.targetDoctorCount = Number(targetCountSetting.value || 4)
+          }
+
+          const extraLeaveAccrualsSetting = settingsResult.data.find((item) => item.key === 'extraLeaveAccruals')
+          if (extraLeaveAccrualsSetting?.value) {
+            try {
+              const extraLeaveAccruals = Array.isArray(extraLeaveAccrualsSetting.value)
+                ? extraLeaveAccrualsSetting.value
+                : JSON.parse(extraLeaveAccrualsSetting.value)
+              if (Array.isArray(extraLeaveAccruals)) {
+                state.extraLeaveAccruals = extraLeaveAccruals
+              }
+            } catch (error) {
+              console.warn('추가 발생 데이터를 해석하지 못했습니다.', error)
+            }
+          }
+
+          const weeklyMemosSetting = settingsResult.data.find((item) => item.key === 'weeklyMemos')
+          if (weeklyMemosSetting?.value) {
+            try {
+              const weeklyMemos = Array.isArray(weeklyMemosSetting.value)
+                ? weeklyMemosSetting.value
+                : JSON.parse(weeklyMemosSetting.value)
+              if (Array.isArray(weeklyMemos)) {
+                state.weeklyMemos = weeklyMemos
+              }
+            } catch (error) {
+              console.warn('주간 메모 데이터를 해석하지 못했습니다.', error)
+            }
           }
         }
 
@@ -1534,6 +1663,40 @@
       }
     }
 
+    async function saveExtraLeaveAccrualsToSupabase() {
+      try {
+        const { error } = await db
+          .from('settings')
+          .upsert({
+            key: 'extraLeaveAccruals',
+            value: JSON.stringify(state.extraLeaveAccruals || []),
+          }, { onConflict: 'key' })
+
+        if (error) throw error
+        return true
+      } catch (error) {
+        console.warn('Supabase에 추가 발생 데이터를 저장하지 못했습니다.', error)
+        return false
+      }
+    }
+
+    async function saveWeeklyMemosToSupabase() {
+      try {
+        const { error } = await db
+          .from('settings')
+          .upsert({
+            key: 'weeklyMemos',
+            value: JSON.stringify(state.weeklyMemos || []),
+          }, { onConflict: 'key' })
+
+        if (error) throw error
+        return true
+      } catch (error) {
+        console.warn('Supabase에 주간 메모 데이터를 저장하지 못했습니다.', error)
+        return false
+      }
+    }
+
     function setSyncStatus(message, type = 'yellow') {
       const target = document.getElementById('syncStatus')
       if (!target) return
@@ -1546,7 +1709,6 @@
       setSyncStatus('Supabase 동기화 중...', 'yellow')
 
       pruneOldLocalSchedules()
-      await deleteOldSchedulesFromSupabase()
 
       const loadedFromSupabase = await loadDataFromSupabase()
       await loadPublicHolidaysForVisibleDates()
@@ -1573,7 +1735,6 @@
       setSyncStatus('Supabase 저장 중...', 'yellow')
 
       pruneOldLocalSchedules()
-      await deleteOldSchedulesFromSupabase()
 
       const visibleDates = getVisibleDates()
 
@@ -1606,24 +1767,26 @@
         shift.date >= SCHEDULE_DATA_START_DATE
       ))
 
-      const [scheduleSaved, fixedScheduleSaved] = await Promise.all([
+      const [scheduleSaved, fixedScheduleSaved, extraLeaveAccrualsSaved, weeklyMemosSaved] = await Promise.all([
         saveSchedulesToSupabase(schedulesToSave),
         saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate),
+        saveExtraLeaveAccrualsToSupabase(),
+        saveWeeklyMemosToSupabase(),
       ])
 
-      if (scheduleSaved && fixedScheduleSaved) {
+      if (scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved) {
         setLastSyncedState()
         await loadDataFromSupabase()
         renderAll()
       }
 
       setSyncStatus(
-        scheduleSaved && fixedScheduleSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
-        scheduleSaved && fixedScheduleSaved ? 'green' : 'red'
+        scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
+        scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? 'green' : 'red'
       )
 
-      alert(scheduleSaved && fixedScheduleSaved
-        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개와 고정스케쥴을 Supabase에 저장하고 동기화했습니다.`
+      alert(scheduleSaved && fixedScheduleSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
+        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 고정스케쥴, 추가 발생, 메모 데이터를 Supabase에 저장하고 동기화했습니다.`
         : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
     }
@@ -1678,6 +1841,19 @@
       }
 
       return colors[doctorId] || { bg: '#f8fafc', strong: '#e2e8f0', border: '#cbd5e1', text: '#334155' }
+    }
+
+    function getShiftStatusColor(status) {
+      const colors = {
+        '8': { bg: '#e5e7eb', strong: '#111827', border: '#111827', text: '#ffffff' },
+        '7': { bg: '#dcfce7', strong: '#bbf7d0', border: '#22c55e', text: '#14532d' },
+        '6': { bg: '#fef3c7', strong: '#fde68a', border: '#f59e0b', text: '#92400e' },
+        '5': { bg: '#fee2e2', strong: '#fecaca', border: '#ef4444', text: '#991b1b' },
+        '4': { bg: '#fee2e2', strong: '#fecaca', border: '#ef4444', text: '#991b1b' },
+        '2': { bg: '#dbeafe', strong: '#bfdbfe', border: '#3b82f6', text: '#1e3a8a' },
+      }
+
+      return colors[String(status)] || { bg: '#f8fafc', strong: '#e2e8f0', border: '#cbd5e1', text: '#334155' }
     }
 
     function getMonthDates(month) {
@@ -1735,6 +1911,32 @@
     function isShortDay(date) {
       const day = getDayNumber(date)
       return day === 0 || day === 6 || isPublicHoliday(date)
+    }
+
+    function isCurrentWeekDate(date) {
+      const currentWeekStart = getCurrentWeekStart()
+      const currentWeekEnd = addDays(currentWeekStart, 6)
+      return date >= currentWeekStart && date <= currentWeekEnd
+    }
+
+    function getCurrentWeekClass(date) {
+      if (!isCurrentWeekDate(date)) return ''
+
+      const day = getMondayBasedDay(date)
+      return [
+        day === 1 ? 'current-week-start' : '',
+        day === 7 ? 'current-week-end' : '',
+      ].filter(Boolean).join(' ')
+    }
+
+    function getCurrentWeekTopClass(date) {
+      if (!isCurrentWeekDate(date)) return ''
+      return ['current-week-top', getCurrentWeekClass(date)].filter(Boolean).join(' ')
+    }
+
+    function getCurrentWeekBottomClass(date) {
+      if (!isCurrentWeekDate(date)) return ''
+      return ['current-week-bottom', getCurrentWeekClass(date)].filter(Boolean).join(' ')
     }
 
     function getDefaultWorkStatus(doctor, date) {
@@ -1840,6 +2042,113 @@
       ]
     }
 
+    function getWeeklyChangedShifts(weekDates) {
+      const weekDateSet = new Set(weekDates)
+      const swapChanges = (state.swaps || [])
+        .filter((swap) => swap.status === '승인' && weekDateSet.has(swap.requesterDate))
+        .map((swap) => ({
+          type: 'swap',
+          date: swap.requesterDate,
+          fromDoctorId: swap.requesterId,
+          toDoctorId: swap.partnerId,
+        }))
+
+      const leaveChanges = weekDates
+        .flatMap((date) => getShiftsByDate(date))
+        .filter((shift) => isLeaveUsageStatus(shift.status))
+        .map((shift) => ({
+          type: 'leave',
+          date: shift.date,
+          doctorId: shift.doctorId,
+          status: shift.status,
+        }))
+
+      return [...swapChanges, ...leaveChanges]
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    }
+
+    function getWeeklyMemoShifts(weekDates) {
+      const weekStartDate = getWeekStartDate(weekDates[0])
+      return (state.weeklyMemos || [])
+        .filter((memo) => memo.weekStartDate === weekStartDate)
+        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+    }
+
+    function renderWeeklyShiftSummary(shifts, emptyText, renderItem) {
+      if (shifts.length === 0) {
+        return `<span class="muted">${emptyText}</span>`
+      }
+
+      return `
+        <div class="schedule-check-warning" style="color:var(--text);">
+          ${shifts.map(renderItem).join('')}
+        </div>
+      `
+    }
+
+    function formatMemoCreatedAt(value) {
+      if (!value) return ''
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return ''
+
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      const hour = String(date.getHours()).padStart(2, '0')
+      const minute = String(date.getMinutes()).padStart(2, '0')
+      return `${month}/${day} ${hour}:${minute}`
+    }
+
+    function renderWeeklyMemoList(weekDates) {
+      const weekStartDate = getWeekStartDate(weekDates[0])
+      const memos = getWeeklyMemoShifts(weekDates)
+      const memoList = memos.length === 0
+        ? '<div class="muted" style="font-size:11px;">-</div>'
+        : `
+          <div style="display:grid;gap:4px;font-size:11px;line-height:1.35;">
+            ${memos.map((memo) => `
+              <div>
+                <span class="muted">${escapeHtml(formatMemoCreatedAt(memo.createdAt))}</span>
+                ${escapeHtml(memo.text)}
+                <button class="btn" type="button" style="padding:2px 6px;border-radius:8px;font-size:10px;margin-left:4px;" onclick="deleteWeeklyMemo('${memo.id}')">삭제</button>
+              </div>
+            `).join('')}
+          </div>
+        `
+
+      return `
+        ${memoList}
+        <div style="display:flex;gap:4px;margin-top:6px;align-items:center;">
+          <input id="weeklyMemoInput-${weekStartDate}" class="input" type="text" placeholder="메모 추가" style="padding:6px 8px;font-size:11px;" />
+          <button class="btn" type="button" style="padding:6px 8px;font-size:11px;" onclick="addWeeklyMemo('${weekStartDate}')">+</button>
+        </div>
+      `
+    }
+
+    function addWeeklyMemo(weekStartDate) {
+      const input = document.getElementById(`weeklyMemoInput-${weekStartDate}`)
+      const text = input?.value.trim()
+
+      if (!text) return
+
+      state.weeklyMemos.push({
+        id: crypto.randomUUID(),
+        weekStartDate,
+        text,
+        createdAt: new Date().toISOString(),
+      })
+
+      saveState()
+      markUnsavedChanges()
+      renderAll()
+    }
+
+    function deleteWeeklyMemo(id) {
+      state.weeklyMemos = (state.weeklyMemos || []).filter((memo) => memo.id !== id)
+      saveState()
+      markUnsavedChanges()
+      renderAll()
+    }
+
     async function generateMonthSchedule(showAlert = true) {
       const visibleDates = getVisibleDates()
       const visibleMonths = [...new Set(visibleDates.map((date) => getMonthKey(date)))]
@@ -1922,7 +2231,7 @@
       const shift = getShift(leave.doctorId, leave.date)
       if (!shift) return
 
-      shift.status = '연차'
+      shift.status = '연차사용'
       shift.source = '연차반영'
       shift.memo = leave.reason || '연차 등록'
     }
@@ -1966,14 +2275,12 @@
       const reason = document.getElementById('leaveReason').value.trim()
 
       const shift = getShift(doctorId, date)
-      const doctor = getDoctor(doctorId)
-
       if (!shift) {
         alert('해당 날짜의 스케쥴이 없습니다. 먼저 월간 스케쥴을 생성해주세요.')
         return
       }
 
-      const validation = validateShiftChange(shift, '연차')
+      const validation = validateShiftChange(shift, '연차사용')
       const needsCover = !validation.valid
 
       const leave = {
@@ -1992,7 +2299,6 @@
 
       if (!needsCover) {
         applyLeaveToSchedule(leave)
-        doctor.leaveUsed += unit === '종일' ? 1 : 0.5
       }
 
       saveState()
@@ -2012,8 +2318,7 @@
       const shift = getShift(leave.doctorId, leave.date)
       if (!shift) return
 
-      const validation = validateShiftChange(shift, '연차')
-      const doctor = getDoctor(leave.doctorId)
+      const validation = validateShiftChange(shift, '연차사용')
 
       if (!validation.valid) {
         alert(`승인 불가: ${leave.date} 진료 인원이 ${validation.count}명이 됩니다. 대체근무를 먼저 지정해야 합니다.`)
@@ -2023,7 +2328,6 @@
       leave.status = '승인'
       leave.needsCover = false
       applyLeaveToSchedule(leave)
-      doctor.leaveUsed += leave.unit === '종일' ? 1 : 0.5
 
       saveState()
       renderAll()
@@ -2058,7 +2362,7 @@
         return
       }
 
-      const valid = requesterShift.status === '진료' && partnerShift.status === '진료'
+      const valid = isWorkingStatus(requesterShift.status) && isWorkingStatus(partnerShift.status)
 
       state.swaps.push({
         id: crypto.randomUUID(),
@@ -2123,11 +2427,37 @@
       state.selectedShiftId = shiftId
       document.getElementById('shiftModalTitle').textContent = `${doctor.name} · ${shift.date}`
       document.getElementById('shiftModalSubtitle').textContent = `현재 상태: ${shift.status} / 생성 방식: ${shift.source}`
-      document.getElementById('shiftStatusSelect').value = shift.status
-      document.getElementById('shiftMemo').value = shift.memo || ''
+      document.getElementById('shiftStatusSelect').value = shift.status === '연차' ? '연차사용' : shift.status
+      renderSwapTargetList(shift)
 
       updateShiftModalAlert()
       document.getElementById('shiftModal').classList.add('active')
+    }
+
+    function renderSwapTargetList(shift) {
+      const targetBox = document.getElementById('swapTargetBox')
+      const targetList = document.getElementById('swapTargetList')
+      if (!targetBox || !targetList) return
+
+      targetBox.style.display = 'none'
+
+      const targetDoctors = getActiveDoctors().filter((doctor) => {
+        if (doctor.id === shift.doctorId) return false
+        const targetShift = getShift(doctor.id, shift.date)
+        return !targetShift || !isWorkingStatus(targetShift.status)
+      })
+
+      targetList.innerHTML = targetDoctors.length > 0
+        ? targetDoctors.map((doctor) => `
+          <button class="btn" type="button" onclick="applyOneToOneSwap('${doctor.id}')">${doctor.name}</button>
+        `).join('')
+        : '<div class="alert yellow">이 날짜에 휴무인 원장님이 없습니다.</div>'
+    }
+
+    function showSwapTargetList() {
+      const targetBox = document.getElementById('swapTargetBox')
+      if (!targetBox) return
+      targetBox.style.display = 'grid'
     }
 
     function updateShiftModalAlert() {
@@ -2135,8 +2465,14 @@
       if (!shift) return
 
       const nextStatus = document.getElementById('shiftStatusSelect').value
-      const validation = validateShiftChange(shift, nextStatus)
       const alertBox = document.getElementById('shiftModalAlert')
+
+      if (nextStatus === '__swap__') {
+        alertBox.innerHTML = `<div class="alert yellow">스왑할 원장님을 선택해주세요.</div>`
+        return
+      }
+
+      const validation = validateShiftChange(shift, nextStatus)
 
       if (validation.valid) {
         alertBox.innerHTML = `<div class="alert green">변경 후 ${shift.date} 진료 인원은 ${validation.count}명입니다. 정상입니다.</div>`
@@ -2145,18 +2481,59 @@
       }
     }
 
-    function closeShiftModal() {
-      document.getElementById('shiftModal').classList.remove('active')
-      state.selectedShiftId = null
-    }
-
-    async function saveShiftModal() {
+    function applyShiftModalChange({ closeAfterChange = false } = {}) {
       const shift = state.shifts.find((item) => item.id === state.selectedShiftId)
       if (!shift) return
 
       shift.status = document.getElementById('shiftStatusSelect').value
-      shift.memo = document.getElementById('shiftMemo').value.trim()
       shift.source = '수동수정'
+
+      saveState()
+      markUnsavedChanges()
+
+      if (closeAfterChange) {
+        closeShiftModal()
+      }
+
+      renderAll()
+    }
+
+    function applyOneToOneSwap(targetDoctorId) {
+      const sourceShift = state.shifts.find((item) => item.id === state.selectedShiftId)
+      if (!sourceShift) return
+
+      if (!isWorkingStatus(sourceShift.status)) {
+        alert('근무 중인 칸에서만 1:1 스왑을 적용할 수 있습니다.')
+        return
+      }
+
+      const targetShift = getShift(targetDoctorId, sourceShift.date)
+      const targetDoctor = getDoctor(targetDoctorId)
+
+      if (!targetShift) {
+        alert('선택한 원장님의 해당 날짜 스케쥴을 찾을 수 없습니다.')
+        return
+      }
+
+      const movedStatus = sourceShift.status
+      sourceShift.status = '휴무'
+      sourceShift.source = '스왑반영'
+      sourceShift.memo = ''
+
+      targetShift.status = movedStatus
+      targetShift.source = '스왑반영'
+      targetShift.memo = ''
+
+      state.swaps.push({
+        id: crypto.randomUUID(),
+        requesterId: sourceShift.doctorId,
+        partnerId: targetDoctorId,
+        requesterDate: sourceShift.date,
+        partnerDate: sourceShift.date,
+        status: '승인',
+        validationResult: '정상',
+        createdAt: new Date().toISOString(),
+      })
 
       saveState()
       markUnsavedChanges()
@@ -2164,7 +2541,19 @@
       renderAll()
     }
 
-    document.getElementById('shiftStatusSelect').addEventListener('change', updateShiftModalAlert)
+    function closeShiftModal() {
+      document.getElementById('shiftModal').classList.remove('active')
+      state.selectedShiftId = null
+    }
+
+    document.getElementById('shiftStatusSelect').addEventListener('change', () => {
+      updateShiftModalAlert()
+      if (document.getElementById('shiftStatusSelect').value === '__swap__') {
+        showSwapTargetList()
+        return
+      }
+      applyShiftModalChange({ closeAfterChange: true })
+    })
 
     function getFixedScheduleOptions(selectedStatus) {
       const statuses = [
@@ -2191,6 +2580,19 @@
       const td = select.closest('td')
       if (!td) return
 
+      if (select.value) {
+        const statusColor = getShiftStatusColor(select.value)
+        td.style.setProperty('--doctor-bg', statusColor.bg)
+        td.style.setProperty('--doctor-bg-strong', statusColor.strong)
+        td.style.setProperty('--doctor-border', statusColor.border)
+        td.style.setProperty('--doctor-text', statusColor.text)
+      } else {
+        td.style.removeProperty('--doctor-bg')
+        td.style.removeProperty('--doctor-bg-strong')
+        td.style.removeProperty('--doctor-border')
+        td.style.removeProperty('--doctor-text')
+      }
+
       td.classList.toggle('fixed-status-on', Boolean(select.value))
       td.classList.toggle('fixed-status-off', !select.value)
     }
@@ -2205,12 +2607,20 @@
         .join('')
 
       const rows = activeDoctors.map((doctor) => {
-        const doctorColor = getDoctorColor(doctor.id)
-        const cellStyle = `--doctor-bg:${doctorColor.bg}; --doctor-bg-strong:${doctorColor.strong}; --doctor-border:${doctorColor.border}; --doctor-text:${doctorColor.text};`
-
         const cells = [1, 2, 3, 4, 5, 6, 7].map((day) => {
           const value = template[doctor.id]?.[day] || ''
-          return `<br>            <td class="${getFixedScheduleCellClass(value)}" style="${cellStyle}"><br>              <select data-doctor-id="${doctor.id}" data-day="${day}" onchange="updateFixedScheduleCellStyle(this)"><br>                ${getFixedScheduleOptions(value)}<br>              </select><br>            </td><br>          `
+          const statusColor = getShiftStatusColor(value)
+          const cellStyle = value
+            ? `--doctor-bg:${statusColor.bg}; --doctor-bg-strong:${statusColor.strong}; --doctor-border:${statusColor.border}; --doctor-text:${statusColor.text};`
+            : ''
+
+          return `
+            <td class="${getFixedScheduleCellClass(value)}" style="${cellStyle}">
+              <select data-doctor-id="${doctor.id}" data-day="${day}" onchange="updateFixedScheduleCellStyle(this)">
+                ${getFixedScheduleOptions(value)}
+              </select>
+            </td>
+          `
         }).join('')
 
         return `<tr><td>${doctor.name}</td>${cells}</tr>`
@@ -2409,7 +2819,7 @@
     function renderDashboard() {
       const invalids = validateDailyCounts().filter((item) => !item.valid)
       const monthShifts = state.shifts.filter((shift) => shift.date.startsWith(state.selectedMonth))
-      const leaveOrOffCount = monthShifts.filter((shift) => ['연차', '휴무'].includes(shift.status)).length
+      const leaveOrOffCount = monthShifts.filter((shift) => ['연차', '연차사용', '휴무'].includes(shift.status)).length
       const manualChangeCount = monthShifts.filter((shift) => shift.source === '수동수정').length
 
       document.getElementById('monthLabel').textContent = state.selectedMonth
@@ -2448,7 +2858,11 @@
       const table = document.getElementById('scheduleTable')
 
       if (hasBeforeScheduleDataStart(dates)) {
-        table.innerHTML = `<br>          <tr><br>            <td style="text-align:center;padding:30px;">이전 데이터는 구글 시트를 참조해주세요.</td><br>          </tr><br>        `
+        table.innerHTML = `
+          <tr>
+            <td style="text-align:center;padding:30px;">이전 데이터는 구글 시트를 참조해주세요.</td>
+          </tr>
+        `
         return
       }
 
@@ -2468,7 +2882,8 @@
         const weekdayClass = day === 0 || isPublicHoliday(date) ? 'weekday-sun' : day === 6 ? 'weekday-sat' : ''
         const weekClass = day === 1 ? 'week-start' : ''
         const holidayClass = isPublicHoliday(date) ? 'holiday' : ''
-        const className = `${weekdayClass} ${weekClass} ${holidayClass}`.trim()
+        const currentWeekClass = getCurrentWeekTopClass(date)
+        const className = `${weekdayClass} ${weekClass} ${holidayClass} ${currentWeekClass}`.trim()
         return `<th class="${className}">${Number(date.slice(8))}</th>`
       }).join('')
 
@@ -2476,11 +2891,11 @@
         const cells = dates.map((date) => {
           const shift = getShift(doctor.id, date)
           const day = getDayNumber(date)
-          const weekClass = day === 1 ? 'week-start' : ''
+          const weekClass = `${day === 1 ? 'week-start' : ''} ${getCurrentWeekClass(date)}`.trim()
           if (!shift) return `<td class="${weekClass}">-</td>`
 
           const classMap = {
-            '8': 'time',
+            '8': 'time late',
             '7': 'time',
             '6': 'time',
             '5': 'time',
@@ -2488,18 +2903,19 @@
             '2': 'time',
             '휴무': 'off',
             '연차': 'leave',
+            '연차사용': 'leave',
           }
 
-          const doctorColor = getDoctorColor(doctor.id)
+          const statusColor = getShiftStatusColor(shift.status)
           const isOff = !isWorkingStatus(shift.status)
           const cellStyle = isOff
             ? ''
-            : `--doctor-bg:${doctorColor.bg}; --doctor-bg-strong:${doctorColor.strong}; --doctor-border:${doctorColor.border}; --doctor-text:${doctorColor.text};`
+            : `--doctor-bg:${statusColor.bg}; --doctor-bg-strong:${statusColor.strong}; --doctor-border:${statusColor.border}; --doctor-text:${statusColor.text};`
 
           return `
             <td class="schedule-day-cell ${isOff ? 'status-off' : 'status-on'} ${weekClass}" style="${cellStyle}">
               <span class="cell ${classMap[shift.status]}" onclick="openShiftModal('${shift.id}')">
-                ${shift.status}
+                ${shift.status === '연차사용' ? '연차' : shift.status}
               </span>
             </td>
           `
@@ -2515,7 +2931,7 @@
 
       const countRow = dates.map((date) => {
         const day = getDayNumber(date)
-        const weekClass = day === 1 ? 'week-start' : ''
+        const weekClass = `${day === 1 ? 'week-start' : ''} ${getCurrentWeekClass(date)}`.trim()
         const count = getShiftsByDate(date).filter((shift) => isWorkingStatus(shift.status)).length
         const minimumRequiredCount = getMinimumRequiredCount(date)
         const ok = count >= minimumRequiredCount
@@ -2523,6 +2939,8 @@
       }).join('')
 
       const scheduleCheckCells = []
+      const changeHistoryCells = []
+      const memoCells = []
       let weekStartIndex = 0
 
       for (let index = 0; index < dates.length; index += 1) {
@@ -2533,7 +2951,18 @@
 
         const weekDates = dates.slice(weekStartIndex, index + 1)
         const firstWeekDate = weekDates[0]
-        const weekClass = getDayNumber(firstWeekDate) === 1 ? 'week-start' : ''
+        const isCurrentWeekBlock = weekDates.some((weekDate) => isCurrentWeekDate(weekDate))
+        const weekClassBase = [
+          getDayNumber(firstWeekDate) === 1 ? 'week-start' : '',
+        ].filter(Boolean).join(' ')
+        const weekClass = [
+          weekClassBase,
+          isCurrentWeekBlock ? 'current-week-start current-week-end' : '',
+        ].filter(Boolean).join(' ')
+        const bottomWeekClass = [
+          weekClassBase,
+          isCurrentWeekBlock ? 'current-week-bottom current-week-start current-week-end' : '',
+        ].filter(Boolean).join(' ')
         const warnings = weekDates.flatMap((weekDate) => getScheduleWarningsForDate(weekDate, dates))
 
         if (warnings.length === 0) {
@@ -2548,10 +2977,34 @@
           `)
         }
 
+        const changedShifts = getWeeklyChangedShifts(weekDates)
+        changeHistoryCells.push(`
+          <td colspan="${weekDates.length}" class="schedule-check-cell ${weekClass}">
+            ${renderWeeklyShiftSummary(changedShifts, '-', (change) => {
+              if (change.type === 'swap') {
+                const fromDoctor = getDoctor(change.fromDoctorId)
+                const toDoctor = getDoctor(change.toDoctorId)
+                return `<div><strong>${escapeHtml(change.date)}</strong> : 스왑 [${escapeHtml(fromDoctor?.name || change.fromDoctorId)} -&gt; ${escapeHtml(toDoctor?.name || change.toDoctorId)}]</div>`
+              }
+
+              const doctor = getDoctor(change.doctorId)
+              return `<div><strong>${escapeHtml(change.date)}</strong> : ${escapeHtml(doctor?.name || change.doctorId)} ${escapeHtml(change.status)}</div>`
+            })}
+          </td>
+        `)
+
+        memoCells.push(`
+          <td colspan="${weekDates.length}" class="schedule-check-cell ${bottomWeekClass}">
+            ${renderWeeklyMemoList(weekDates)}
+          </td>
+        `)
+
         weekStartIndex = index + 1
       }
 
       const scheduleCheckRow = scheduleCheckCells.join('')
+      const changeHistoryRow = changeHistoryCells.join('')
+      const memoRow = memoCells.join('')
 
       table.innerHTML = `
         <tr>
@@ -2570,6 +3023,14 @@
         <tr>
           <td>오류 감지</td>
           ${scheduleCheckRow}
+        </tr>
+        <tr>
+          <td>변경 내역</td>
+          ${changeHistoryRow}
+        </tr>
+        <tr>
+          <td>메모</td>
+          ${memoRow}
         </tr>
       `
     }
@@ -2632,45 +3093,325 @@
       }).join('')
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;')
+    }
+
+    function getTodayDateString() {
+      return formatDate(new Date())
+    }
+
+    function getFixedAnnualLeaveItems(doctorId) {
+      const fixedItems = {
+        'kim-jun': [
+          { label: '2025잔여', amount: 6 },
+          { label: '2026신규', amount: 6 },
+        ],
+        'kim-young': [
+          { label: '2025잔여', amount: 2 },
+        ],
+        'park': [
+          { label: '2025잔여', amount: 4 },
+        ],
+        'ahn': [
+          { label: '2026신규', amount: 6 },
+        ],
+        'hwang': [
+          { label: '2026신규', amount: 6 },
+        ],
+      }
+
+      return fixedItems[doctorId] || []
+    }
+
+    function getAnniversaryAnnualLeaveItems(doctor) {
+      if (!doctor.joinedAt) return []
+
+      const today = getTodayDateString()
+      const joinedYear = Number(doctor.joinedAt.slice(0, 4))
+      const currentYear = Number(today.slice(0, 4))
+      const anniversaryMonthDay = doctor.joinedAt.slice(5)
+      const existingLabels = new Set(getFixedAnnualLeaveItems(doctor.id).map((item) => item.label))
+      const items = []
+
+      for (let year = Math.max(2026, joinedYear + 1); year <= currentYear; year += 1) {
+        const anniversaryDate = `${year}-${anniversaryMonthDay}`
+        const label = `${year}신규`
+
+        if (anniversaryDate <= today && !existingLabels.has(label)) {
+          items.push({ label, amount: 6 })
+        }
+      }
+
+      return items
+    }
+
+    function getAnnualLeaveItems(doctor) {
+      return [
+        ...getFixedAnnualLeaveItems(doctor.id),
+        ...getAnniversaryAnnualLeaveItems(doctor),
+      ]
+    }
+
+    function getExtraLeaveAccruals(doctorId) {
+      return (state.extraLeaveAccruals || [])
+        .filter((item) => item.doctorId === doctorId)
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    }
+
+    function isLeaveUsageStatus(status) {
+      return String(status) === '연차사용'
+    }
+
+    function getLeaveUsageRecords(doctorId) {
+      return state.shifts
+        .filter((shift) => shift.doctorId === doctorId && isLeaveUsageStatus(shift.status))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    }
+
+    function getLeaveUsedCount(doctorId) {
+      return getLeaveUsageRecords(doctorId).length
+    }
+
+    function getTotalLeaveEarned(doctor) {
+      const annualTotal = getAnnualLeaveItems(doctor)
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0)
+      const extraTotal = getExtraLeaveAccruals(doctor.id)
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0)
+
+      return annualTotal + extraTotal
+    }
+
+    function getExtraLeaveAccrualCount(doctorId) {
+      return getExtraLeaveAccruals(doctorId)
+        .reduce((sum, item) => sum + Number(item.amount || 0), 0)
+    }
+
+    function getRemainingLeaveCount(doctor) {
+      return getTotalLeaveEarned(doctor) - getLeaveUsedCount(doctor.id)
+    }
+
+    function getAnnualLeaveYears(doctors) {
+      const years = new Set()
+
+      for (const doctor of doctors) {
+        for (const item of getAnnualLeaveItems(doctor)) {
+          const year = String(item.label).match(/\d{4}/)?.[0]
+          if (year) years.add(year)
+        }
+      }
+
+      return [...years].sort()
+    }
+
+    function renderAnnualLeaveItemList(doctor, years) {
+      const items = getAnnualLeaveItems(doctor)
+      if (items.length === 0) return '-'
+
+      return `
+        <div style="display:grid;gap:6px;align-content:start;">
+          ${years.map((year) => {
+            const yearItems = items.filter((item) => String(item.label).startsWith(year))
+            const content = yearItems.length
+              ? yearItems.map((item) => `<strong>${escapeHtml(item.label)}</strong> : ${escapeHtml(item.amount)}`).join('<br />')
+              : '&nbsp;'
+
+            return `<div style="min-height:24px;">${content}</div>`
+          }).join('')}
+        </div>
+      `
+    }
+
+    function renderExtraLeaveAccrualCell(doctor) {
+      const items = getExtraLeaveAccruals(doctor.id)
+      const itemList = items.length
+        ? `
+          <div style="display:grid;gap:4px;margin-bottom:8px;">
+            ${items.map((item) => `
+              <div>
+                <strong>${escapeHtml(item.date)}</strong>
+                <div class="muted">: ${escapeHtml(item.reason || '사유 없음')}</div>
+              </div>
+            `).join('')}
+          </div>
+        `
+        : '<div class="muted" style="margin-bottom:8px;">-</div>'
+
+      if (state.activeExtraAccrualDoctorId !== doctor.id) {
+        return `
+          ${itemList}
+          <button class="btn" type="button" onclick="openExtraLeaveAccrualForm('${doctor.id}')">+</button>
+        `
+      }
+
+      return `
+        ${itemList}
+        <div style="display:grid;gap:6px;">
+          <input id="extraAccrualDate-${doctor.id}" class="input" type="date" value="${getTodayDateString()}" />
+          <input id="extraAccrualReason-${doctor.id}" class="input" type="text" placeholder="추가 발생 사유" />
+          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
+            <button class="btn primary" type="button" onclick="saveExtraLeaveAccrual('${doctor.id}')">임시 등록</button>
+            <button class="btn" type="button" onclick="closeExtraLeaveAccrualForm()">취소</button>
+          </div>
+        </div>
+      `
+    }
+
+    function renderLeaveUsageHistory(doctor) {
+      const records = getLeaveUsageRecords(doctor.id)
+      if (records.length === 0) return '<div class="muted" style="text-align:center;">-</div>'
+
+      return `
+        <div style="display:grid;gap:4px;">
+          ${records.map((record) => `
+            <div>
+              <strong>${escapeHtml(record.date)}</strong>
+              ${record.memo ? `<div class="muted">${escapeHtml(record.memo)}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `
+    }
+
+    function openExtraLeaveAccrualForm(doctorId) {
+      state.activeExtraAccrualDoctorId = doctorId
+      renderLedger()
+    }
+
+    function closeExtraLeaveAccrualForm() {
+      state.activeExtraAccrualDoctorId = null
+      renderLedger()
+    }
+
+    function saveExtraLeaveAccrual(doctorId) {
+      const date = document.getElementById(`extraAccrualDate-${doctorId}`)?.value
+      const reason = document.getElementById(`extraAccrualReason-${doctorId}`)?.value.trim()
+
+      if (!date) {
+        alert('추가 발생 날짜를 선택해주세요.')
+        return
+      }
+
+      if (!reason) {
+        alert('추가 발생 사유를 입력해주세요.')
+        return
+      }
+
+      state.extraLeaveAccruals.push({
+        id: crypto.randomUUID(),
+        doctorId,
+        date,
+        reason,
+        amount: 1,
+        createdAt: new Date().toISOString(),
+      })
+      state.activeExtraAccrualDoctorId = null
+
+      saveState()
+      markUnsavedChanges()
+      renderAll()
+    }
+
     function renderLedger() {
       const table = document.getElementById('ledgerTable')
+      const doctors = getActiveDoctors().filter((doctor) => doctor.role !== '대표원장')
+      const annualLeaveYears = getAnnualLeaveYears(doctors)
+      const doctorHeaders = doctors
+        .map((doctor) => `<th style="background:#f9fafb;font-size:14px;">${doctor.name}</th>`)
+        .join('')
+      const rowLabelStyle = 'font-weight:900;background:#fbfcfe;'
 
-      const rows = getActiveDoctors()
-        .filter((doctor) => doctor.role !== '대표원장')
-        .map((doctor) => {
-        const remain = doctor.leaveEarned - doctor.leaveUsed
-        const status = remain < 0
-          ? `<span class="badge red">초과 사용</span>`
-          : `<span class="badge green">정상</span>`
+      function renderLedgerRow(label, getValue, options = {}) {
+        const labelStyle = `${rowLabelStyle}${options.labelStyle || ''}`
+        const cellStyle = options.cellStyle || ''
+        const rowStyle = options.rowStyle || ''
+        const labelCell = options.skipLabel
+          ? ''
+          : `<td style="${labelStyle}" ${options.labelRowspan ? `rowspan="${options.labelRowspan}"` : ''}>${label}</td>`
 
         return `
-          <tr>
-            <th colspan="2" style="background:#f9fafb;font-size:14px;">${doctor.name}</th>
-          </tr>
-          <tr>
-            <td style="font-weight:900;background:#fbfcfe;">입사일</td>
-            <td>${doctor.joinedAt || '-'}</td>
-          </tr>
-          <tr>
-            <td style="font-weight:900;background:#fbfcfe;">총 발생일수</td>
-            <td>${doctor.leaveEarned}</td>
-          </tr>
-          <tr>
-            <td style="font-weight:900;background:#fbfcfe;">총 사용일수</td>
-            <td>${doctor.leaveUsed}</td>
-          </tr>
-          <tr>
-            <td style="font-weight:900;background:#fbfcfe;">잔여휴일</td>
-            <td><strong>${remain}</strong></td>
-          </tr>
-          <tr>
-            <td style="font-weight:900;background:#fbfcfe;">상태</td>
-            <td>${status}</td>
+          <tr style="${rowStyle}">
+            ${labelCell}
+            ${doctors.map((doctor, index) => {
+              const edgeStyle = index === doctors.length - 1 ? (options.lastCellStyle || '') : ''
+              return `<td style="${cellStyle}${edgeStyle}">${getValue(doctor)}</td>`
+            }).join('')}
           </tr>
         `
-      }).join('')
+      }
 
-      table.innerHTML = rows
+      const rows = [
+        renderLedgerRow('입사일', (doctor) => doctor.joinedAt || '-'),
+        renderLedgerRow(
+          '잔여 휴일',
+          (doctor) => `<strong>${getRemainingLeaveCount(doctor)}</strong>`,
+          {
+            labelStyle: 'border-top:3px solid #1d4ed8;border-bottom:3px solid #1d4ed8;border-left:3px solid #1d4ed8;background:#dbeafe;color:#1e3a8a;',
+            cellStyle: 'border-top:3px solid #1d4ed8;border-bottom:3px solid #1d4ed8;background:#dbeafe;color:#1e3a8a;font-size:14px;font-weight:900;',
+            lastCellStyle: 'border-right:3px solid #1d4ed8;',
+          },
+        ),
+        renderLedgerRow(
+          '총 발생일수',
+          (doctor) => `<strong>${getTotalLeaveEarned(doctor)}</strong>`,
+          {
+            labelStyle: 'background:#dcfce7;color:#166534;',
+            cellStyle: 'background:#dcfce7;color:#166534;font-weight:900;',
+          },
+        ),
+        renderLedgerRow(
+          '연차',
+          (doctor) => renderAnnualLeaveItemList(doctor, annualLeaveYears),
+          { cellStyle: 'vertical-align:top;text-align:center;padding:8px 6px;' },
+        ),
+        renderLedgerRow(
+          '추가 발생',
+          (doctor) => `<strong>${getExtraLeaveAccrualCount(doctor.id)}</strong>`,
+          { labelRowspan: 2 },
+        ),
+        renderLedgerRow(
+          '',
+          (doctor) => renderExtraLeaveAccrualCell(doctor),
+          { skipLabel: true, cellStyle: 'vertical-align:top;padding:8px 6px;' },
+        ),
+        renderLedgerRow(
+          '총 사용일수',
+          (doctor) => getLeaveUsedCount(doctor.id),
+          {
+            rowStyle: 'border-top:3px solid #111827;',
+            labelStyle: 'background:#fee2e2;color:#991b1b;',
+            cellStyle: 'background:#fee2e2;color:#991b1b;font-weight:900;',
+          },
+        ),
+        renderLedgerRow(
+          '사용 내역',
+          (doctor) => renderLeaveUsageHistory(doctor),
+          { cellStyle: 'vertical-align:top;text-align:center;padding:8px 6px;' },
+        ),
+        renderLedgerRow(
+          '상태',
+          (doctor) => {
+            const remain = getRemainingLeaveCount(doctor)
+            return remain < 0
+              ? `<span class="badge red">초과 사용</span>`
+              : `<span class="badge green">정상</span>`
+          },
+          { rowStyle: 'border-top:3px solid #111827;' },
+        ),
+      ].join('')
+
+      table.innerHTML = `
+        <tr>
+          <th style="background:#f9fafb;"></th>
+          ${doctorHeaders}
+        </tr>
+        ${rows}
+      `
     }
 
     function renderSettings() {
@@ -2822,7 +3563,6 @@
       setSyncStatus('로컬 표시 중', 'yellow')
 
       ;(async () => {
-        await deleteOldSchedulesFromSupabase()
         const loadedFromSupabase = await loadDataFromSupabase()
         await loadPublicHolidaysForVisibleDates()
 
