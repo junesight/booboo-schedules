@@ -370,7 +370,7 @@
       left: 0;
       background: white;
       z-index: 2;
-      text-align: left;
+      text-align: center;
       font-weight: 800;
       width: 82px;
       min-width: 82px;
@@ -598,11 +598,30 @@
 
     .fixed-schedule-table select {
       width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 8px;
+      border: 1px solid var(--doctor-border, var(--line));
+      border-radius: 999px;
       padding: 6px 4px;
-      background: white;
+      background: var(--doctor-bg-strong, white);
+      color: var(--doctor-text, var(--text));
       font-size: 12px;
+      font-weight: 900;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .fixed-schedule-table td.fixed-status-on {
+      background: var(--doctor-bg);
+    }
+
+    .fixed-schedule-table td.fixed-status-off {
+      background: #fbfcfe;
+    }
+
+    .fixed-schedule-table td.fixed-status-off select {
+      background: #f8fafc;
+      border-color: #eef2f7;
+      color: #94a3b8;
+      font-weight: 800;
     }
 
     .modal-head {
@@ -981,11 +1000,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     const STORAGE_KEY = 'bubu-doctor-schedule-v01'
+    const LAST_SYNC_STORAGE_KEY = 'bubu-doctor-schedule-v01-last-sync'
     const SUPABASE_URL = 'https://wfyuxxskwlczoyisdcmy.supabase.co'
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yUeE6ynEpbR3Eq-k3Gv1Ew_1DiaJHjz'
     const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
     const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토']
+    const SCHEDULE_DATA_START_DATE = '2026-05-18'
     const DOCTOR_ORDER = ['choi', 'kim-jun', 'kim-young', 'park', 'ahn', 'hwang']
 
     function sortDoctors(doctors) {
@@ -1219,6 +1240,34 @@
       return JSON.parse(JSON.stringify(initialState))
     }
 
+    function cloneState(value) {
+      return JSON.parse(JSON.stringify(value))
+    }
+
+    function loadLastSyncedState() {
+      const raw = safeGetItem(LAST_SYNC_STORAGE_KEY)
+      if (!raw) return null
+
+      try {
+        return JSON.parse(raw)
+      } catch {
+        return null
+      }
+    }
+
+    function setLastSyncedState(snapshot = state) {
+      lastSyncedState = cloneState(snapshot)
+      safeSetItem(LAST_SYNC_STORAGE_KEY, JSON.stringify(lastSyncedState))
+    }
+
+    function getLastSyncedState() {
+      return lastSyncedState || loadLastSyncedState()
+    }
+
+    function markUnsavedChanges() {
+      setSyncStatus('수정됨 · 저장 필요', 'yellow')
+    }
+
     function safeGetItem(key) {
       try {
         return window.localStorage.getItem(key)
@@ -1247,6 +1296,7 @@
       }).finally(() => clearTimeout(timer))
     }
 
+    let lastSyncedState = null
     let state = loadState()
     state.viewStartDate = state.viewStartDate || getCurrentWeekStart()
     state.selectedMonth = getMonthKey(state.viewStartDate)
@@ -1254,6 +1304,8 @@
     if (!state.fixedScheduleTemplate || Object.keys(state.fixedScheduleTemplate).length === 0) {
       state.fixedScheduleTemplate = getDefaultFixedScheduleTemplate()
     }
+
+    lastSyncedState = loadLastSyncedState()
 
     function loadState() {
       const raw = safeGetItem(STORAGE_KEY)
@@ -1268,6 +1320,37 @@
 
     function saveState() {
       safeSetItem(STORAGE_KEY, JSON.stringify(state))
+    }
+
+    function hasBeforeScheduleDataStart(dates) {
+      return dates.some((date) => date < SCHEDULE_DATA_START_DATE)
+    }
+
+    function pruneOldLocalSchedules() {
+      const beforeCount = state.shifts.length
+      state.shifts = state.shifts.filter((shift) => shift.date >= SCHEDULE_DATA_START_DATE)
+
+      if (state.shifts.length !== beforeCount) {
+        saveState()
+        return true
+      }
+
+      return false
+    }
+
+    async function deleteOldSchedulesFromSupabase() {
+      try {
+        const { error } = await db
+          .from('schedules')
+          .delete()
+          .lt('date', SCHEDULE_DATA_START_DATE)
+
+        if (error) throw error
+        return true
+      } catch (error) {
+        console.warn('Supabase의 5/18 이전 스케쥴을 삭제하지 못했습니다.', error)
+        return false
+      }
     }
 
     function toBoolean(value) {
@@ -1295,7 +1378,7 @@
           settingsResult,
         ] = await Promise.all([
           db.from('doctors').select('*').order('doctor_id'),
-          db.from('schedules').select('*'),
+          db.from('schedules').select('*').gte('date', SCHEDULE_DATA_START_DATE),
           db.from('holidays').select('*'),
           db.from('fixed_schedules').select('*'),
           db.from('settings').select('*'),
@@ -1362,6 +1445,7 @@
         }
 
         saveState()
+        setLastSyncedState()
         return true
       } catch (error) {
         console.warn('Supabase 데이터를 불러오지 못해 로컬 데이터를 사용합니다.', error)
@@ -1398,7 +1482,9 @@
 
     async function saveSchedulesToSupabase(schedules = state.shifts) {
       try {
-        const rows = schedules.map(toSupabaseShiftRow)
+        const rows = schedules
+          .filter((shift) => shift.date >= SCHEDULE_DATA_START_DATE)
+          .map(toSupabaseShiftRow)
         const chunkSize = 500
 
         if (rows.length === 0) {
@@ -1461,6 +1547,9 @@
     async function syncNow() {
       setSyncStatus('Supabase 동기화 중...', 'yellow')
 
+      pruneOldLocalSchedules()
+      await deleteOldSchedulesFromSupabase()
+
       const loadedFromSupabase = await loadDataFromSupabase()
       await loadPublicHolidaysForVisibleDates()
 
@@ -1469,7 +1558,8 @@
       normalizePublicHolidayShiftsForVisibleDates()
 
       if (generatedAfterSync || repairedAfterSync) {
-        await saveSchedulesToSupabase(state.shifts)
+        saveState()
+        markUnsavedChanges()
       }
 
       renderAll()
@@ -1484,7 +1574,19 @@
     async function uploadCurrentDataToSupabase() {
       setSyncStatus('Supabase 저장 중...', 'yellow')
 
-      const visibleMonths = [...new Set(getVisibleDates().map((date) => getMonthKey(date)))]
+      pruneOldLocalSchedules()
+      await deleteOldSchedulesFromSupabase()
+
+      const visibleDates = getVisibleDates()
+
+      if (hasBeforeScheduleDataStart(visibleDates)) {
+        setSyncStatus('5/18 이후만 저장 가능', 'red')
+        alert('5/18 이전 데이터는 저장하지 않습니다. 이전 데이터는 구글 시트를 참조해주세요.')
+        renderAll()
+        return
+      }
+
+      const visibleMonths = [...new Set(visibleDates.map((date) => getMonthKey(date)))]
 
       for (const month of visibleMonths) {
         const hasMonthWork = state.shifts.some((shift) => (
@@ -1503,7 +1605,7 @@
       renderAll()
 
       const schedulesToSave = state.shifts.filter((shift) => (
-        visibleMonths.some((month) => shift.date.startsWith(month))
+        shift.date >= SCHEDULE_DATA_START_DATE
       ))
 
       const [scheduleSaved, fixedScheduleSaved] = await Promise.all([
@@ -1511,22 +1613,46 @@
         saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate),
       ])
 
+      if (scheduleSaved && fixedScheduleSaved) {
+        setLastSyncedState()
+        await loadDataFromSupabase()
+        renderAll()
+      }
+
       setSyncStatus(
-        scheduleSaved && fixedScheduleSaved ? `Supabase 저장 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
+        scheduleSaved && fixedScheduleSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
         scheduleSaved && fixedScheduleSaved ? 'green' : 'red'
       )
 
       alert(scheduleSaved && fixedScheduleSaved
-        ? `현재 보이는 기간의 스케쥴 ${schedulesToSave.length}개와 고정스케쥴을 Supabase에 저장했습니다.`
+        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개와 고정스케쥴을 Supabase에 저장하고 동기화했습니다.`
         : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
     }
 
-    function resetData() {
-      if (!confirm('모든 데이터를 초기 상태로 되돌릴까요?')) return
-      state = structuredClone(initialState)
-      saveState()
-      initializeApp()
+    async function resetData() {
+      if (!confirm('마지막으로 저장하고 동기화한 지점으로 되돌릴까요?')) return
+
+      const snapshot = getLastSyncedState()
+
+      if (snapshot) {
+        state = cloneState(snapshot)
+        saveState()
+        renderAll()
+        setSyncStatus('마지막 저장 지점으로 복원', 'green')
+        return
+      }
+
+      setSyncStatus('Supabase에서 복원 중...', 'yellow')
+      const loadedFromSupabase = await loadDataFromSupabase()
+
+      if (loadedFromSupabase) {
+        renderAll()
+        setSyncStatus('Supabase 복원 완료', 'green')
+      } else {
+        setSyncStatus('복원 실패', 'red')
+        alert('마지막 저장 지점을 찾지 못했습니다. Supabase 연결 상태를 확인해주세요.')
+      }
     }
 
     function downloadJson() {
@@ -1725,7 +1851,7 @@
       }
 
       saveState()
-      await saveSchedulesToSupabase(state.shifts)
+      markUnsavedChanges()
       renderAll()
       if (showAlert) {
         alert('4주 스케쥴을 생성했습니다.')
@@ -1759,6 +1885,8 @@
       const nextShifts = []
 
       for (const date of dates) {
+        if (date < SCHEDULE_DATA_START_DATE) continue
+
         for (const doctor of activeDoctors) {
           nextShifts.push(createDefaultShift(doctor, date, weeklyScheduleTemplate))
         }
@@ -1772,6 +1900,11 @@
 
     function repairVisibleScheduleIfEmpty() {
       const visibleDates = getVisibleDates()
+
+      if (hasBeforeScheduleDataStart(visibleDates)) {
+        return false
+      }
+
       const visibleShifts = state.shifts.filter((shift) => visibleDates.includes(shift.date))
       const hasVisibleWork = visibleShifts.some((shift) => isWorkingStatus(shift.status))
 
@@ -2028,7 +2161,7 @@
       shift.source = '수동수정'
 
       saveState()
-      await saveShiftToSupabase(shift)
+      markUnsavedChanges()
       closeShiftModal()
       renderAll()
     }
@@ -2052,6 +2185,18 @@
       }).join('')
     }
 
+    function getFixedScheduleCellClass(value) {
+      return value ? 'fixed-status-on' : 'fixed-status-off'
+    }
+
+    function updateFixedScheduleCellStyle(select) {
+      const td = select.closest('td')
+      if (!td) return
+
+      td.classList.toggle('fixed-status-on', Boolean(select.value))
+      td.classList.toggle('fixed-status-off', !select.value)
+    }
+
     function renderFixedScheduleTable() {
       const table = document.getElementById('fixedScheduleTable')
       const template = getFixedScheduleTemplate()
@@ -2062,9 +2207,12 @@
         .join('')
 
       const rows = activeDoctors.map((doctor) => {
+        const doctorColor = getDoctorColor(doctor.id)
+        const cellStyle = `--doctor-bg:${doctorColor.bg}; --doctor-bg-strong:${doctorColor.strong}; --doctor-border:${doctorColor.border}; --doctor-text:${doctorColor.text};`
+
         const cells = [1, 2, 3, 4, 5, 6, 7].map((day) => {
           const value = template[doctor.id]?.[day] || ''
-          return `<td><select data-doctor-id="${doctor.id}" data-day="${day}">${getFixedScheduleOptions(value)}</select></td>`
+          return `<br>            <td class="${getFixedScheduleCellClass(value)}" style="${cellStyle}"><br>              <select data-doctor-id="${doctor.id}" data-day="${day}" onchange="updateFixedScheduleCellStyle(this)"><br>                ${getFixedScheduleOptions(value)}<br>              </select><br>            </td><br>          `
         }).join('')
 
         return `<tr><td>${doctor.name}</td>${cells}</tr>`
@@ -2155,7 +2303,7 @@
 
       state.fixedScheduleTemplate = readFixedScheduleTemplateFromModal()
       saveState()
-      await saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate)
+      markUnsavedChanges()
 
       const visibleMonths = [...new Set(getVisibleDates().map((date) => getMonthKey(date)))]
 
@@ -2169,13 +2317,13 @@
       const changed = applyFixedScheduleToDateRange(effectiveDate)
 
       saveState()
-      await saveSchedulesToSupabase(state.shifts)
+      markUnsavedChanges()
       closeFixedScheduleModal()
       renderAll()
 
       alert(changed
-        ? '고정스케쥴 변경을 반영했습니다.'
-        : '변경할 기본 스케쥴이 없습니다. 수동수정된 칸은 유지됩니다.'
+        ? '고정스케쥴 변경을 화면에 반영했습니다. 최종 저장은 상단의 현재 데이터 저장 버튼을 눌러주세요.'
+        : '변경할 기본 스케쥴이 없습니다. 수동수정된 칸은 유지됩니다. 최종 저장은 상단의 현재 데이터 저장 버튼을 눌러주세요.'
       )
     }
 
@@ -2301,6 +2449,11 @@
       const dates = getVisibleDates()
       const table = document.getElementById('scheduleTable')
 
+      if (hasBeforeScheduleDataStart(dates)) {
+        table.innerHTML = `<br>          <tr><br>            <td style="text-align:center;padding:30px;">이전 데이터는 구글 시트를 참조해주세요.</td><br>          </tr><br>        `
+        return
+      }
+
       if (state.shifts.length === 0) {
         table.innerHTML = `
           <tr>
@@ -2408,7 +2561,7 @@
           ${monthHeaderCells}
         </tr>
         <tr>
-          <th>원장님</th>
+          <th></th>
           ${headerCells}
         </tr>
         ${doctorRows}
@@ -2624,6 +2777,11 @@
 
     function ensureVisibleSchedule() {
       const visibleDates = getVisibleDates()
+
+      if (hasBeforeScheduleDataStart(visibleDates)) {
+        return false
+      }
+
       const visibleMonths = [...new Set(visibleDates.map((date) => getMonthKey(date)))]
       let changed = false
 
@@ -2645,18 +2803,21 @@
         state.fixedScheduleTemplate = getDefaultFixedScheduleTemplate()
       }
 
+      pruneOldLocalSchedules()
+
       const generatedMissingSchedule = ensureVisibleSchedule()
       const repairedEmptySchedule = repairVisibleScheduleIfEmpty()
       normalizePublicHolidayShiftsForVisibleDates()
       renderAll()
 
       if (generatedMissingSchedule || repairedEmptySchedule) {
-        saveSchedulesToSupabase(state.shifts)
+        markUnsavedChanges()
       }
 
       setSyncStatus('로컬 표시 중', 'yellow')
 
       ;(async () => {
+        await deleteOldSchedulesFromSupabase()
         const loadedFromSupabase = await loadDataFromSupabase()
         await loadPublicHolidaysForVisibleDates()
 
