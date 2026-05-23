@@ -2635,7 +2635,9 @@
     function renderLedger() {
       const table = document.getElementById('ledgerTable')
 
-      const rows = getActiveDoctors().map((doctor) => {
+      const rows = getActiveDoctors()
+        .filter((doctor) => doctor.role !== '대표원장')
+        .map((doctor) => {
         const remain = doctor.leaveEarned - doctor.leaveUsed
         const status = remain < 0
           ? `<span class="badge red">초과 사용</span>`
@@ -2643,27 +2645,32 @@
 
         return `
           <tr>
-            <td>${doctor.name}</td>
+            <th colspan="2" style="background:#f9fafb;font-size:14px;">${doctor.name}</th>
+          </tr>
+          <tr>
+            <td style="font-weight:900;background:#fbfcfe;">입사일</td>
             <td>${doctor.joinedAt || '-'}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:900;background:#fbfcfe;">총 발생일수</td>
             <td>${doctor.leaveEarned}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:900;background:#fbfcfe;">총 사용일수</td>
             <td>${doctor.leaveUsed}</td>
+          </tr>
+          <tr>
+            <td style="font-weight:900;background:#fbfcfe;">잔여휴일</td>
             <td><strong>${remain}</strong></td>
+          </tr>
+          <tr>
+            <td style="font-weight:900;background:#fbfcfe;">상태</td>
             <td>${status}</td>
           </tr>
         `
       }).join('')
 
-      table.innerHTML = `
-        <tr>
-          <th>원장님</th>
-          <th>입사일</th>
-          <th>총 발생일수</th>
-          <th>총 사용일수</th>
-          <th>잔여휴일</th>
-          <th>상태</th>
-        </tr>
-        ${rows}
-      `
+      table.innerHTML = rows
     }
 
     function renderSettings() {
