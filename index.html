@@ -986,6 +986,27 @@
     const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
     const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토']
+    const DOCTOR_ORDER = ['choi', 'kim-jun', 'kim-young', 'park', 'ahn', 'hwang']
+
+    function sortDoctors(doctors) {
+      return [...doctors].sort((a, b) => {
+        const aIndex = DOCTOR_ORDER.indexOf(a.id)
+        const bIndex = DOCTOR_ORDER.indexOf(b.id)
+
+        if (aIndex === -1 && bIndex === -1) {
+          return a.name.localeCompare(b.name, 'ko')
+        }
+
+        if (aIndex === -1) return 1
+        if (bIndex === -1) return -1
+
+        return aIndex - bIndex
+      })
+    }
+
+    function getActiveDoctors() {
+      return sortDoctors(state.doctors.filter((doctor) => doctor.active))
+    }
 
     function getCurrentMonth() {
       const today = new Date()
@@ -1287,7 +1308,7 @@
         if (settingsResult.error) throw settingsResult.error
 
         if (Array.isArray(doctorsResult.data) && doctorsResult.data.length > 0) {
-          state.doctors = doctorsResult.data.map((doctor) => ({
+          state.doctors = sortDoctors(doctorsResult.data.map((doctor) => ({
             id: doctor.doctor_id,
             name: doctor.name,
             role: doctor.role,
@@ -1297,7 +1318,7 @@
             active: Boolean(doctor.active),
             leaveEarned: Number(doctor.leave_earned || 0),
             leaveUsed: Number(doctor.leave_used || 0),
-          }))
+          })))
         }
 
         if (Array.isArray(schedulesResult.data)) {
@@ -1380,6 +1401,10 @@
         const rows = schedules.map(toSupabaseShiftRow)
         const chunkSize = 500
 
+        if (rows.length === 0) {
+          throw new Error('저장할 스케쥴 데이터가 없습니다.')
+        }
+
         for (let index = 0; index < rows.length; index += chunkSize) {
           const chunk = rows.slice(index, index + chunkSize)
           const { error } = await db
@@ -1389,9 +1414,11 @@
           if (error) throw error
         }
 
+        window.lastSupabaseScheduleSaveError = ''
         return true
       } catch (error) {
         console.warn('Supabase에 전체 스케쥴을 저장하지 못했습니다.', error)
+        window.lastSupabaseScheduleSaveError = error.message || String(error)
         return false
       }
     }
@@ -1457,28 +1484,41 @@
     async function uploadCurrentDataToSupabase() {
       setSyncStatus('Supabase 저장 중...', 'yellow')
 
+      const visibleMonths = [...new Set(getVisibleDates().map((date) => getMonthKey(date)))]
+
+      for (const month of visibleMonths) {
+        const hasMonthWork = state.shifts.some((shift) => (
+          shift.date.startsWith(month) && isWorkingStatus(shift.status)
+        ))
+
+        if (!hasMonthWork) {
+          generateMonthScheduleForMonth(month)
+        }
+      }
+
       const visibleGenerated = ensureVisibleSchedule()
       const visibleRepaired = repairVisibleScheduleIfEmpty()
       normalizePublicHolidayShiftsForVisibleDates()
+      saveState()
+      renderAll()
 
-      if (visibleGenerated || visibleRepaired) {
-        saveState()
-        renderAll()
-      }
+      const schedulesToSave = state.shifts.filter((shift) => (
+        visibleMonths.some((month) => shift.date.startsWith(month))
+      ))
 
       const [scheduleSaved, fixedScheduleSaved] = await Promise.all([
-        saveSchedulesToSupabase(state.shifts),
+        saveSchedulesToSupabase(schedulesToSave),
         saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate),
       ])
 
       setSyncStatus(
-        scheduleSaved && fixedScheduleSaved ? 'Supabase 저장 완료' : '저장 확인 필요',
+        scheduleSaved && fixedScheduleSaved ? `Supabase 저장 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
         scheduleSaved && fixedScheduleSaved ? 'green' : 'red'
       )
 
       alert(scheduleSaved && fixedScheduleSaved
-        ? '현재 스케쥴과 고정스케쥴을 Supabase에 저장했습니다.'
-        : '일부 데이터 저장에 실패했습니다. Supabase 설정과 권한을 확인해주세요.'
+        ? `현재 보이는 기간의 스케쥴 ${schedulesToSave.length}개와 고정스케쥴을 Supabase에 저장했습니다.`
+        : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
     }
 
@@ -1714,7 +1754,7 @@
 
     function generateMonthScheduleForMonth(month) {
       const dates = getMonthDates(month)
-      const activeDoctors = state.doctors.filter((doctor) => doctor.active)
+      const activeDoctors = getActiveDoctors()
       const weeklyScheduleTemplate = getFixedScheduleTemplate()
       const nextShifts = []
 
@@ -2015,7 +2055,7 @@
     function renderFixedScheduleTable() {
       const table = document.getElementById('fixedScheduleTable')
       const template = getFixedScheduleTemplate()
-      const activeDoctors = state.doctors.filter((doctor) => doctor.active)
+      const activeDoctors = getActiveDoctors()
 
       const header = ['원장님', '월', '화', '수', '목', '금', '토', '일']
         .map((label) => `<th>${label}</th>`)
@@ -2076,7 +2116,7 @@
     }
 
     function applyFixedScheduleToDateRange(effectiveDate) {
-      const activeDoctors = state.doctors.filter((doctor) => doctor.active)
+      const activeDoctors = getActiveDoctors()
       const template = getFixedScheduleTemplate()
       let changed = false
 
@@ -2211,8 +2251,7 @@
     }
 
     function renderDoctorSelects() {
-      const options = state.doctors
-        .filter((doctor) => doctor.active)
+      const options = getActiveDoctors()
         .map((doctor) => `<option value="${doctor.id}">${doctor.name}</option>`)
         .join('')
 
@@ -2282,7 +2321,7 @@
         return `<th class="${className}">${Number(date.slice(8))}</th>`
       }).join('')
 
-      const doctorRows = state.doctors.filter((doctor) => doctor.active).map((doctor) => {
+      const doctorRows = getActiveDoctors().map((doctor) => {
         const cells = dates.map((date) => {
           const shift = getShift(doctor.id, date)
           const day = getDayNumber(date)
@@ -2445,7 +2484,7 @@
     function renderLedger() {
       const table = document.getElementById('ledgerTable')
 
-      const rows = state.doctors.filter((doctor) => doctor.active).map((doctor) => {
+      const rows = getActiveDoctors().map((doctor) => {
         const remain = doctor.leaveEarned - doctor.leaveUsed
         const status = remain < 0
           ? `<span class="badge red">초과 사용</span>`
@@ -2478,7 +2517,7 @@
 
     function renderSettings() {
       const target = document.getElementById('doctorSettings')
-      target.innerHTML = state.doctors.map((doctor) => {
+      target.innerHTML = sortDoctors(state.doctors).map((doctor) => {
         const fixed = doctor.fixedWeekdays.length
           ? doctor.fixedWeekdays.map((day) => DAY_LABELS[day]).join(', ')
           : '없음'
