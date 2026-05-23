@@ -403,7 +403,7 @@
     }
 
     #ledgerTable .ledger-value-cell {
-      position: static;
+      position: static !important;
       left: auto;
       z-index: auto;
       width: auto;
@@ -413,6 +413,58 @@
       font-size: 11px;
       font-weight: 400;
       background: inherit;
+    }
+
+    #ledgerTable .ledger-extra-cell {
+      display: grid;
+      gap: 6px;
+      align-content: start;
+      justify-items: center;
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1.35;
+    }
+
+    #ledgerTable .ledger-extra-list {
+      display: grid;
+      gap: 5px;
+      width: 100%;
+      margin-bottom: 2px;
+      font-size: 11px;
+      font-weight: 400;
+    }
+
+    #ledgerTable .ledger-extra-item {
+      display: grid;
+      gap: 1px;
+      font-weight: 400;
+    }
+
+    #ledgerTable .ledger-extra-date {
+      font-weight: 400;
+    }
+
+    #ledgerTable .ledger-extra-form {
+      display: grid;
+      gap: 5px;
+      width: min(150px, 100%);
+      margin: 0 auto;
+    }
+
+    #ledgerTable .ledger-extra-form .input {
+      min-height: 28px;
+      padding: 5px 7px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 400;
+    }
+
+    #ledgerTable .ledger-extra-cell .btn {
+      padding: 5px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.2;
     }
 
     .week-start {
@@ -3767,32 +3819,36 @@
       const items = getExtraLeaveAccruals(doctor.id)
       const itemList = items.length
         ? `
-          <div style="display:grid;gap:4px;margin-bottom:8px;">
+          <div class="ledger-extra-list">
             ${items.map((item) => `
-              <div>
-                <strong>${escapeHtml(item.date)}</strong>
+              <div class="ledger-extra-item">
+                <div class="ledger-extra-date">${escapeHtml(item.date)}</div>
                 <div class="muted">: ${escapeHtml(item.reason || '사유 없음')}</div>
               </div>
             `).join('')}
           </div>
         `
-        : '<div class="muted" style="margin-bottom:8px;">-</div>'
+        : '<div class="muted">-</div>'
 
       if (state.activeExtraAccrualDoctorId !== doctor.id) {
         return `
-          ${itemList}
-          <button class="btn" type="button" onclick="openExtraLeaveAccrualForm('${doctor.id}')">+</button>
+          <div class="ledger-extra-cell">
+            ${itemList}
+            <button class="btn" type="button" onclick="openExtraLeaveAccrualForm('${doctor.id}')">+</button>
+          </div>
         `
       }
 
       return `
-        ${itemList}
-        <div style="display:grid;gap:6px;">
-          <input id="extraAccrualDate-${doctor.id}" class="input" type="date" value="${getTodayDateString()}" />
-          <input id="extraAccrualReason-${doctor.id}" class="input" type="text" placeholder="추가 발생 사유" />
-          <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
-            <button class="btn primary" type="button" onclick="saveExtraLeaveAccrual('${doctor.id}')">임시 등록</button>
-            <button class="btn" type="button" onclick="closeExtraLeaveAccrualForm()">취소</button>
+        <div class="ledger-extra-cell">
+          ${itemList}
+          <div class="ledger-extra-form">
+            <input id="extraAccrualDate-${doctor.id}" class="input" type="date" value="${getTodayDateString()}" />
+            <input id="extraAccrualReason-${doctor.id}" class="input" type="text" placeholder="추가 발생 사유" />
+            <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
+              <button class="btn primary" type="button" onclick="saveExtraLeaveAccrual('${doctor.id}')">임시 등록</button>
+              <button class="btn" type="button" onclick="closeExtraLeaveAccrualForm()">취소</button>
+            </div>
           </div>
         </div>
       `
