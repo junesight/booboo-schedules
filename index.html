@@ -1286,6 +1286,8 @@
     const DOCTOR_ORDER = ['choi', 'kim-jun', 'kim-young', 'park', 'ahn', 'hwang']
     let pendingNavigationDate = null
     let pendingPasswordResolver = null
+    let currentVisibleDayCount = null
+    let responsiveScheduleTimer = null
 
     function normalizeDoctorRole(doctor) {
       if (doctor.id === 'choi') return '대표원장'
@@ -1340,6 +1342,17 @@
 
     function getMonthKey(dateString) {
       return dateString.slice(0, 7)
+    }
+
+    function getResponsiveVisibleDayCount() {
+      if (!window.matchMedia) return 28
+
+      const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches
+      const isNarrowScreen = window.matchMedia('(max-width: 980px)').matches
+      const isLandscape = window.matchMedia('(orientation: landscape)').matches
+
+      if (!isCoarsePointer && !isNarrowScreen) return 28
+      return isLandscape ? 14 : 7
     }
 
     const DEFAULT_PUBLIC_HOLIDAYS = [
@@ -3511,7 +3524,7 @@
     }
 
     function getVisibleDates() {
-      return Array.from({ length: 28 }, (_, index) => addDays(state.viewStartDate, index))
+      return Array.from({ length: currentVisibleDayCount || getResponsiveVisibleDayCount() }, (_, index) => addDays(state.viewStartDate, index))
     }
 
     function renderMonthHeaderCells(dates) {
@@ -4282,6 +4295,8 @@
     }
 
     async function initializeApp() {
+      currentVisibleDayCount = getResponsiveVisibleDayCount()
+
       if (!state.fixedScheduleTemplate) {
         state.fixedScheduleTemplate = getDefaultFixedScheduleTemplate()
       }
@@ -4317,6 +4332,20 @@
         )
       })()
     }
+
+    function handleResponsiveScheduleViewChange() {
+      const nextVisibleDayCount = getResponsiveVisibleDayCount()
+      if (nextVisibleDayCount === currentVisibleDayCount) return
+
+      currentVisibleDayCount = nextVisibleDayCount
+      clearTimeout(responsiveScheduleTimer)
+      responsiveScheduleTimer = setTimeout(() => {
+        initializeApp()
+      }, 120)
+    }
+
+    window.addEventListener('resize', handleResponsiveScheduleViewChange)
+    window.addEventListener('orientationchange', handleResponsiveScheduleViewChange)
 
     initializeApp()  
   </script>
