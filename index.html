@@ -568,6 +568,12 @@
       font-weight: 900;
     }
 
+    .count-warning {
+      background: var(--yellow-soft);
+      color: var(--yellow);
+      font-weight: 900;
+    }
+
     .count-bad {
       background: var(--red-soft);
       color: var(--red);
@@ -1168,16 +1174,23 @@
       <div class="field">
         <label>근무 상태</label>
         <select id="shiftStatusSelect" class="select">
-          <option value="8">8시 퇴근</option>
-          <option value="7">7시 퇴근</option>
-          <option value="6">6시 퇴근</option>
-          <option value="5">5시 퇴근</option>
-          <option value="4">4시 퇴근</option>
-          <option value="2">2시 퇴근</option>
+          <option value="__work__">진료</option>
           <option value="휴무">휴무</option>
           <option value="연차사용">연차사용</option>
           <option value="__swap__">1:1 스왑</option>
         </select>
+      </div>
+
+      <div id="workTimeBox" class="field" style="display:none;">
+        <label>퇴근 시간</label>
+        <div id="workTimeList" class="toolbar-left">
+          <button class="btn" type="button" onclick="applyWorkTime('2')">2시</button>
+          <button class="btn" type="button" onclick="applyWorkTime('4')">4시</button>
+          <button class="btn" type="button" onclick="applyWorkTime('5')">5시</button>
+          <button class="btn" type="button" onclick="applyWorkTime('6')">6시</button>
+          <button class="btn" type="button" onclick="applyWorkTime('7')">7시</button>
+          <button class="btn" type="button" onclick="applyWorkTime('8')">8시</button>
+        </div>
       </div>
 
       <div id="swapTargetBox" class="field" style="display:none;">
@@ -3131,11 +3144,31 @@
       state.selectedShiftId = shiftId
       document.getElementById('shiftModalTitle').textContent = `${doctor.name} · ${shift.date}`
       document.getElementById('shiftModalSubtitle').textContent = `현재 상태: ${shift.status} / 생성 방식: ${shift.source}`
-      document.getElementById('shiftStatusSelect').value = shift.status === '연차' ? '연차사용' : shift.status
+      document.getElementById('shiftStatusSelect').value = isWorkingStatus(shift.status)
+        ? '__work__'
+        : shift.status === '연차' ? '연차사용' : shift.status
       renderSwapTargetList(shift)
+      hideShiftOptionPanels()
+
+      if (isWorkingStatus(shift.status)) {
+        showWorkTimeList()
+      }
 
       updateShiftModalAlert()
       document.getElementById('shiftModal').classList.add('active')
+    }
+
+    function hideShiftOptionPanels() {
+      const workTimeBox = document.getElementById('workTimeBox')
+      const swapTargetBox = document.getElementById('swapTargetBox')
+
+      if (workTimeBox) {
+        workTimeBox.style.display = 'none'
+      }
+
+      if (swapTargetBox) {
+        swapTargetBox.style.display = 'none'
+      }
     }
 
     function renderSwapTargetList(shift) {
@@ -3158,6 +3191,12 @@
         : '<div class="alert yellow">이 날짜에 휴무인 원장님이 없습니다.</div>'
     }
 
+    function showWorkTimeList() {
+      const workTimeBox = document.getElementById('workTimeBox')
+      if (!workTimeBox) return
+      workTimeBox.style.display = 'grid'
+    }
+
     function showSwapTargetList() {
       const targetBox = document.getElementById('swapTargetBox')
       if (!targetBox) return
@@ -3170,6 +3209,11 @@
 
       const nextStatus = document.getElementById('shiftStatusSelect').value
       const alertBox = document.getElementById('shiftModalAlert')
+
+      if (nextStatus === '__work__') {
+        alertBox.innerHTML = `<div class="alert yellow">퇴근 시간을 선택해주세요.</div>`
+        return
+      }
 
       if (nextStatus === '__swap__') {
         alertBox.innerHTML = `<div class="alert yellow">스왑할 원장님을 선택해주세요.</div>`
@@ -3185,11 +3229,17 @@
       }
     }
 
-    function applyShiftModalChange({ closeAfterChange = false } = {}) {
+    function applyShiftModalChange({ closeAfterChange = false, nextStatus = null } = {}) {
       const shift = state.shifts.find((item) => item.id === state.selectedShiftId)
       if (!shift) return
 
-      shift.status = document.getElementById('shiftStatusSelect').value
+      const selectedStatus = nextStatus || document.getElementById('shiftStatusSelect').value
+
+      if (selectedStatus === '__work__' || selectedStatus === '__swap__') {
+        return
+      }
+
+      shift.status = selectedStatus
       shift.source = '수동수정'
 
       saveState()
@@ -3200,6 +3250,13 @@
       }
 
       renderAll()
+    }
+
+    function applyWorkTime(status) {
+      applyShiftModalChange({
+        closeAfterChange: true,
+        nextStatus: status,
+      })
     }
 
     function applyOneToOneSwap(targetDoctorId) {
@@ -3284,8 +3341,16 @@
     }
 
     document.getElementById('shiftStatusSelect').addEventListener('change', () => {
+      hideShiftOptionPanels()
       updateShiftModalAlert()
-      if (document.getElementById('shiftStatusSelect').value === '__swap__') {
+      const selectedStatus = document.getElementById('shiftStatusSelect').value
+
+      if (selectedStatus === '__work__') {
+        showWorkTimeList()
+        return
+      }
+
+      if (selectedStatus === '__swap__') {
         showSwapTargetList()
         return
       }
@@ -3871,7 +3936,12 @@
         const count = getShiftsByDate(date).filter((shift) => isWorkingStatus(shift.status)).length
         const minimumRequiredCount = getMinimumRequiredCount(date)
         const ok = count >= minimumRequiredCount
-        return `<td class="${ok ? 'count-ok' : 'count-bad'} ${weekClass}">${isClinicClosedDate(date) ? '휴진' : `${count}명`}</td>`
+        const isThreeDoctorNormalDay = !isPublicHoliday(date) && (day === 2 || day === 4) && count === 3
+        const countClass = ok
+          ? isThreeDoctorNormalDay ? 'count-warning' : 'count-ok'
+          : 'count-bad'
+
+        return `<td class="${countClass} ${weekClass}">${isClinicClosedDate(date) ? '휴진' : `${count}명`}</td>`
       }).join('')
 
       const scheduleCheckCells = []
