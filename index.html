@@ -472,6 +472,14 @@
       border-left: 4px solid #111827 !important;
     }
 
+    .doctor-block-top {
+      border-top: 2px solid #111827 !important;
+    }
+
+    .doctor-block-bottom {
+      border-bottom: 2px solid #111827 !important;
+    }
+
     .current-week-top {
       border-top: 4px solid var(--red) !important;
     }
@@ -584,6 +592,11 @@
       background: white;
       vertical-align: top;
       min-width: 0;
+    }
+
+    .schedule-check-cell.status-normal {
+      vertical-align: middle;
+      text-align: center;
     }
 
     .schedule-check-ok {
@@ -1421,6 +1434,7 @@
     let weeklyTimetableImage = null
     let weeklyTimetableDoctorImages = null
     let selectedWeeklyTimetableWeekStart = null
+    let lastKnownCurrentWeekStart = getCurrentWeekStart()
 
     function normalizeDoctorRole(doctor) {
       if (doctor.id === 'choi') return '대표원장'
@@ -1794,7 +1808,7 @@
 
     let lastSyncedState = null
     let state = loadState()
-    state.viewStartDate = state.viewStartDate || getCurrentWeekStart()
+    state.viewStartDate = getCurrentWeekStart()
     state.selectedMonth = getMonthKey(state.viewStartDate)
     state.extraLeaveAccruals = state.extraLeaveAccruals || []
     state.weeklyMemos = state.weeklyMemos || []
@@ -3102,6 +3116,48 @@
       return warnings
     }
 
+    function getConsecutiveWorkWarningsForWeek(weekDates) {
+      const weekStartDate = getWeekStartDate(weekDates[0])
+      const weekEndDate = addDays(weekStartDate, 6)
+      const scanStartDate = addDays(weekStartDate, -60)
+      const scanEndDate = addDays(weekEndDate, 60)
+      const warnings = []
+
+      for (const doctor of getActiveDoctors()) {
+        let consecutiveCount = 0
+        let consecutiveEndDate = null
+
+        function addWarningIfRunEndsThisWeek() {
+          if (
+            consecutiveCount >= 6 &&
+            consecutiveEndDate >= weekStartDate &&
+            consecutiveEndDate <= weekEndDate
+          ) {
+            warnings.push(`[확인 요망] ${doctor.name} 원장님 ${consecutiveCount}일 연속 근무입니다.`)
+          }
+        }
+
+        for (let date = scanStartDate; date <= scanEndDate; date = addDays(date, 1)) {
+          const shift = getShift(doctor.id, date)
+          const isWorking = shift && isWorkingStatus(shift.status) && !isClinicClosedDate(date)
+
+          if (!isWorking) {
+            addWarningIfRunEndsThisWeek()
+            consecutiveCount = 0
+            consecutiveEndDate = null
+            continue
+          }
+
+          consecutiveCount += 1
+          consecutiveEndDate = date
+        }
+
+        addWarningIfRunEndsThisWeek()
+      }
+
+      return warnings
+    }
+
     function getScheduleWarningsForDate(date, allDates) {
       return [
         ...getDailyScheduleWarnings(date),
@@ -4223,6 +4279,18 @@
       document.getElementById('unsavedNavigationModal').classList.remove('active')
     }
 
+    function updateViewToCurrentWeekIfWeekChanged() {
+      const currentWeekStart = getCurrentWeekStart()
+
+      if (currentWeekStart === lastKnownCurrentWeekStart) return
+
+      lastKnownCurrentWeekStart = currentWeekStart
+      state.viewStartDate = currentWeekStart
+      state.selectedMonth = getMonthKey(currentWeekStart)
+      saveState()
+      initializeApp()
+    }
+
     function updateTargetCount() {
       state.targetDoctorCount = Number(document.getElementById('targetCountInput').value)
       saveState()
@@ -4346,11 +4414,17 @@
         return `<th class="${className}">${Number(date.slice(8))}</th>`
       }).join('')
 
-      const doctorRows = getActiveDoctors().map((doctor) => {
+      const activeDoctors = getActiveDoctors()
+      const doctorRows = activeDoctors.map((doctor, doctorIndex) => {
+        const doctorBoundaryClass = [
+          doctorIndex === 0 ? 'doctor-block-top' : '',
+          doctorIndex === activeDoctors.length - 1 ? 'doctor-block-bottom' : '',
+        ].filter(Boolean).join(' ')
+
         const cells = dates.map((date) => {
           const shift = getShift(doctor.id, date)
           const day = getDayNumber(date)
-          const weekClass = `${day === 1 ? 'week-start' : ''} ${getCurrentWeekClass(date)}`.trim()
+          const weekClass = `${day === 1 ? 'week-start' : ''} ${getCurrentWeekClass(date)} ${doctorBoundaryClass}`.trim()
           if (!shift) return `<td class="${weekClass}">-</td>`
 
           const classMap = {
@@ -4382,7 +4456,7 @@
 
         return `
           <tr>
-            <td>${doctor.name}</td>
+            <td class="${doctorBoundaryClass}">${doctor.name}</td>
             ${cells}
           </tr>
         `
@@ -4428,10 +4502,13 @@
           weekClassBase,
           isCurrentWeekBlock ? 'current-week-bottom current-week-start current-week-end' : '',
         ].filter(Boolean).join(' ')
-        const warnings = weekDates.flatMap((weekDate) => getScheduleWarningsForDate(weekDate, dates))
+        const warnings = [
+          ...weekDates.flatMap((weekDate) => getScheduleWarningsForDate(weekDate, dates)),
+          ...getConsecutiveWorkWarningsForWeek(weekDates),
+        ]
 
         if (warnings.length === 0) {
-          scheduleCheckCells.push(`<td colspan="${weekDates.length}" class="schedule-check-cell ${weekClass}"><span class="schedule-check-ok">정상</span></td>`)
+          scheduleCheckCells.push(`<td colspan="${weekDates.length}" class="schedule-check-cell status-normal ${weekClass}"><span class="schedule-check-ok">정상</span></td>`)
         } else {
           scheduleCheckCells.push(`
             <td colspan="${weekDates.length}" class="schedule-check-cell ${weekClass}">
@@ -4493,7 +4570,7 @@
           ${countRow}
         </tr>
         <tr>
-          <td>오류 감지</td>
+          <td>이상 감지</td>
           ${scheduleCheckRow}
         </tr>
         <tr>
@@ -5119,6 +5196,7 @@
 
     window.addEventListener('resize', handleResponsiveScheduleViewChange)
     window.addEventListener('orientationchange', handleResponsiveScheduleViewChange)
+    window.setInterval(updateViewToCurrentWeekIfWeekChanged, 60000)
 
     initializeApp()  
   </script>
