@@ -1850,6 +1850,20 @@
               console.warn('주간 메모 데이터를 해석하지 못했습니다.', error)
             }
           }
+
+          const swapsSetting = settingsResult.data.find((item) => item.key === 'swaps')
+          if (swapsSetting?.value) {
+            try {
+              const swaps = Array.isArray(swapsSetting.value)
+                ? swapsSetting.value
+                : JSON.parse(swapsSetting.value)
+              if (Array.isArray(swaps)) {
+                state.swaps = swaps
+              }
+            } catch (error) {
+              console.warn('스왑 데이터를 해석하지 못했습니다.', error)
+            }
+          }
         }
 
         saveState()
@@ -2000,6 +2014,23 @@
         return true
       } catch (error) {
         console.warn('Supabase에 주간 메모 데이터를 저장하지 못했습니다.', error)
+        return false
+      }
+    }
+
+    async function saveSwapsToSupabase() {
+      try {
+        const { error } = await db
+          .from('settings')
+          .upsert({
+            key: 'swaps',
+            value: JSON.stringify(state.swaps || []),
+          }, { onConflict: 'key' })
+
+        if (error) throw error
+        return true
+      } catch (error) {
+        console.warn('Supabase에 스왑 데이터를 저장하지 못했습니다.', error)
         return false
       }
     }
@@ -2159,15 +2190,16 @@
         shift.date >= SCHEDULE_DATA_START_DATE
       ))
 
-      const [scheduleSaved, fixedScheduleSaved, doctorsSaved, extraLeaveAccrualsSaved, weeklyMemosSaved] = await Promise.all([
+      const [scheduleSaved, fixedScheduleSaved, doctorsSaved, extraLeaveAccrualsSaved, weeklyMemosSaved, swapsSaved] = await Promise.all([
         saveSchedulesToSupabase(schedulesToSave),
         saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate),
         saveDoctorsToSupabase(),
         saveExtraLeaveAccrualsToSupabase(),
         saveWeeklyMemosToSupabase(),
+        saveSwapsToSupabase(),
       ])
 
-      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved) {
+      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved) {
         updateLastSaveTime()
         clearUnsavedChanges()
         setLastSyncedState()
@@ -2176,16 +2208,16 @@
       }
 
       setSyncStatus(
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved ? 'green' : 'red'
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved ? 'green' : 'red'
       )
 
-      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
-        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 진료의 설정, 고정스케쥴, 추가 발생, 메모 데이터를 Supabase에 저장하고 동기화했습니다.`
+      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved
+        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 진료의 설정, 고정스케쥴, 추가 발생, 메모, 스왑 데이터를 Supabase에 저장하고 동기화했습니다.`
         : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
 
-      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved
+      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved
     }
 
     async function resetData() {
@@ -2441,6 +2473,49 @@
       ]
     }
 
+    function inferSwapChangesFromShifts(weekDates, existingSwapKeys = new Set()) {
+      const changes = []
+      const template = getFixedScheduleTemplate()
+
+      for (const date of weekDates) {
+        const fromShifts = getShiftsByDate(date)
+          .filter((shift) => shift.source === '스왑반영' && !isWorkingStatus(shift.status))
+        const toShifts = getShiftsByDate(date)
+          .filter((shift) => shift.source === '스왑반영' && isWorkingStatus(shift.status))
+
+        for (const fromShift of fromShifts) {
+          const fromDoctor = getDoctor(fromShift.doctorId)
+          if (!fromDoctor) continue
+
+          const defaultFromShift = createDefaultShift(fromDoctor, date, template)
+          if (!isWorkingStatus(defaultFromShift.status)) continue
+
+          const toShift = toShifts.find((candidate) => {
+            const toDoctor = getDoctor(candidate.doctorId)
+            if (!toDoctor) return false
+
+            const defaultToShift = createDefaultShift(toDoctor, date, template)
+            return !isWorkingStatus(defaultToShift.status) && candidate.status === defaultFromShift.status
+          }) || toShifts.find((candidate) => candidate.doctorId !== fromShift.doctorId)
+
+          if (!toShift) continue
+
+          const key = `${date}-${fromShift.doctorId}-${toShift.doctorId}`
+          if (existingSwapKeys.has(key)) continue
+
+          changes.push({
+            type: 'swap',
+            date,
+            fromDoctorId: fromShift.doctorId,
+            toDoctorId: toShift.doctorId,
+          })
+          existingSwapKeys.add(key)
+        }
+      }
+
+      return changes
+    }
+
     function getWeeklyChangedShifts(weekDates) {
       const weekDateSet = new Set(weekDates)
       const swapChanges = (state.swaps || [])
@@ -2451,6 +2526,10 @@
           fromDoctorId: swap.requesterId,
           toDoctorId: swap.partnerId,
         }))
+      const swapChangeKeys = new Set(
+        swapChanges.map((change) => `${change.date}-${change.fromDoctorId}-${change.toDoctorId}`)
+      )
+      const inferredSwapChanges = inferSwapChangesFromShifts(weekDates, swapChangeKeys)
 
       const leaveChanges = weekDates
         .flatMap((date) => getShiftsByDate(date))
@@ -2462,7 +2541,7 @@
           status: shift.status,
         }))
 
-      return [...swapChanges, ...leaveChanges]
+      return [...swapChanges, ...inferredSwapChanges, ...leaveChanges]
         .sort((a, b) => String(a.date).localeCompare(String(b.date)))
     }
 
