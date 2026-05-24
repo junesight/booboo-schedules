@@ -2471,11 +2471,15 @@
     }
 
     function isWeekdayClinicDate(date) {
+      if (isClinicClosedDate(date)) return false
+
       const day = getDayNumber(date)
       return day >= 1 && day <= 5 && !isPublicHoliday(date)
     }
 
     function getMinimumRequiredCount(date) {
+      if (isClinicClosedDate(date)) return 0
+
       const day = getDayNumber(date)
 
       if (!isPublicHoliday(date) && (day === 2 || day === 4)) {
@@ -2486,6 +2490,8 @@
     }
 
     function getDailyScheduleWarnings(date) {
+      if (isClinicClosedDate(date)) return []
+
       const shifts = getShiftsByDate(date)
       const workingShifts = shifts.filter((shift) => isWorkingStatus(shift.status))
       const warnings = []
@@ -2816,14 +2822,15 @@
 
       return dates.map((date) => {
         const count = getShiftsByDate(date).filter((shift) => isWorkingStatus(shift.status)).length
+        const minimumRequiredCount = getMinimumRequiredCount(date)
 
         return {
           date,
           count,
-          valid: count === state.targetDoctorCount,
-          message: count === state.targetDoctorCount
+          valid: count >= minimumRequiredCount,
+          message: count >= minimumRequiredCount
             ? `${date} 정상`
-            : `${date} 진료 인원 ${count}명 · 목표 ${state.targetDoctorCount}명`,
+            : `${date} 진료 인원 ${count}명 · 최소 ${minimumRequiredCount}명`,
         }
       })
     }
@@ -3694,7 +3701,7 @@
         const count = getShiftsByDate(date).filter((shift) => isWorkingStatus(shift.status)).length
         const minimumRequiredCount = getMinimumRequiredCount(date)
         const ok = count >= minimumRequiredCount
-        return `<td class="${ok ? 'count-ok' : 'count-bad'} ${weekClass}">${count}명</td>`
+        return `<td class="${ok ? 'count-ok' : 'count-bad'} ${weekClass}">${isClinicClosedDate(date) ? '휴진' : `${count}명`}</td>`
       }).join('')
 
       const scheduleCheckCells = []
