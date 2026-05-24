@@ -747,6 +747,27 @@
       width: min(920px, 100%);
     }
 
+    .modal.poster {
+      width: min(960px, 100%);
+    }
+
+    .weekly-timetable-preview {
+      display: grid;
+      place-items: center;
+      background: #f3f4f6;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      overflow: auto;
+    }
+
+    .weekly-timetable-preview canvas {
+      width: min(100%, 720px);
+      height: auto;
+      background: white;
+      box-shadow: var(--shadow);
+    }
+
     .fixed-schedule-table {
       width: 100%;
       min-width: 0;
@@ -1234,6 +1255,28 @@
     </div>
   </div>
 
+  <div id="weeklyTimetableModal" class="modal-backdrop">
+    <div class="modal poster">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title">의료진 진료 시간표</div>
+          <div class="muted" id="weeklyTimetableSubtitle"></div>
+        </div>
+        <button class="close" onclick="closeWeeklyTimetableModal()">×</button>
+      </div>
+
+      <div class="weekly-timetable-preview">
+        <canvas id="weeklyTimetableCanvas" width="2160" height="2160"></canvas>
+      </div>
+
+      <div class="actions" style="margin-top:16px;">
+        <button class="btn" onclick="closeWeeklyTimetableModal()">닫기</button>
+        <button class="btn" onclick="printWeeklyTimetable()">인쇄</button>
+        <button class="btn primary" onclick="downloadWeeklyTimetablePng()">PNG 저장</button>
+      </div>
+    </div>
+  </div>
+
   <div id="unsavedNavigationModal" class="modal-backdrop">
     <div class="modal">
       <div class="modal-head">
@@ -1346,10 +1389,38 @@
     const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토']
     const SCHEDULE_DATA_START_DATE = '2026-05-18'
     const DOCTOR_ORDER = ['choi', 'kim-jun', 'kim-young', 'park', 'ahn', 'hwang']
+    const WEEKLY_TIMETABLE_SOURCE_IMAGE = 'assets/weekly-template-source.png'
+    const WEEKLY_TIMETABLE_DOCTOR_IMAGES = {
+      'choi': 'assets/doctors/choi.png',
+      'kim-jun': 'assets/doctors/kim-jun.png',
+      'kim-young': 'assets/doctors/kim-young.png',
+      'park': 'assets/doctors/park.png',
+      'ahn': 'assets/doctors/ahn.png',
+      'hwang': 'assets/doctors/hwang.png',
+    }
+    const WEEKLY_TIMETABLE_DOCTOR_CROPS = {
+      'choi': { x: 50, y: 204, width: 110, height: 138 },
+      'kim-jun': { x: 50, y: 346, width: 110, height: 138 },
+      'kim-young': { x: 50, y: 488, width: 110, height: 138 },
+      'park': { x: 50, y: 629, width: 110, height: 138 },
+      'ahn': { x: 50, y: 771, width: 110, height: 138 },
+      'hwang': { x: 50, y: 913, width: 110, height: 138 },
+    }
+    const WEEKLY_TIMETABLE_DOCTOR_COLORS = {
+      'choi': '#e9b7b8',
+      'kim-jun': '#bdd4ed',
+      'kim-young': '#ffff99',
+      'park': '#c1bdef',
+      'ahn': '#dcebd0',
+      'hwang': '#ffc49a',
+    }
     let pendingNavigationDate = null
     let pendingPasswordResolver = null
     let currentVisibleDayCount = null
     let responsiveScheduleTimer = null
+    let weeklyTimetableImage = null
+    let weeklyTimetableDoctorImages = null
+    let selectedWeeklyTimetableWeekStart = null
 
     function normalizeDoctorRole(doctor) {
       if (doctor.id === 'choi') return '대표원장'
@@ -2420,6 +2491,347 @@
       a.download = `doctor-schedule-${state.selectedMonth}.json`
       a.click()
       URL.revokeObjectURL(url)
+    }
+
+    function loadWeeklyTimetableImage() {
+      if (weeklyTimetableImage) {
+        return Promise.resolve(weeklyTimetableImage)
+      }
+
+      return new Promise((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => {
+          weeklyTimetableImage = image
+          resolve(image)
+        }
+        image.onerror = reject
+        image.src = WEEKLY_TIMETABLE_SOURCE_IMAGE
+      })
+    }
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => resolve(image)
+        image.onerror = reject
+        image.src = src
+      })
+    }
+
+    async function loadWeeklyTimetableDoctorImages() {
+      if (weeklyTimetableDoctorImages) {
+        return weeklyTimetableDoctorImages
+      }
+
+      const entries = await Promise.all(
+        Object.entries(WEEKLY_TIMETABLE_DOCTOR_IMAGES).map(async ([doctorId, src]) => {
+          try {
+            return [doctorId, await loadImage(src)]
+          } catch (error) {
+            console.warn(`${doctorId} 사진을 불러오지 못했습니다.`, error)
+            return [doctorId, null]
+          }
+        })
+      )
+
+      weeklyTimetableDoctorImages = Object.fromEntries(entries)
+      return weeklyTimetableDoctorImages
+    }
+
+    function formatTimetableDate(date) {
+      const parsed = new Date(`${date}T00:00:00`)
+      return `${parsed.getFullYear()}/${parsed.getMonth() + 1}/${parsed.getDate()}`
+    }
+
+    function formatTimetableShortDate(date) {
+      const parsed = new Date(`${date}T00:00:00`)
+      return `${parsed.getMonth() + 1}/${parsed.getDate()}`
+    }
+
+    function getWeeklyTimetableWeekStart() {
+      return state.viewStartDate || getCurrentWeekStart()
+    }
+
+    function drawTextInBox(ctx, text, x, y, width, height, {
+      font = 'bold 28px sans-serif',
+      color = '#000000',
+      align = 'center',
+      baseline = 'middle',
+      lineHeight = 34,
+    } = {}) {
+      const lines = String(text || '').split('\n')
+      ctx.save()
+      ctx.fillStyle = color
+      ctx.font = font
+      ctx.textAlign = align
+      ctx.textBaseline = baseline
+
+      const textX = align === 'left' ? x + 8 : align === 'right' ? x + width - 8 : x + width / 2
+      const totalHeight = (lines.length - 1) * lineHeight
+      const startY = y + height / 2 - totalHeight / 2
+
+      lines.forEach((line, index) => {
+        ctx.fillText(line, textX, startY + index * lineHeight)
+      })
+
+      ctx.restore()
+    }
+
+    function drawThickLine(ctx, x1, y1, x2, y2, width = 5) {
+      ctx.save()
+      ctx.strokeStyle = '#000000'
+      ctx.lineWidth = width
+      ctx.beginPath()
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x2, y2)
+      ctx.stroke()
+      ctx.restore()
+    }
+
+    function drawImageCover(ctx, image, x, y, width, height) {
+      const sourceRatio = image.width / image.height
+      const targetRatio = width / height
+      let sourceX = 0
+      let sourceY = 0
+      let sourceWidth = image.width
+      let sourceHeight = image.height
+
+      if (sourceRatio > targetRatio) {
+        sourceWidth = image.height * targetRatio
+        sourceX = (image.width - sourceWidth) / 2
+      } else {
+        sourceHeight = image.width / targetRatio
+        sourceY = (image.height - sourceHeight) / 2
+      }
+
+      ctx.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height)
+    }
+
+    function drawDoctorPhoto(ctx, sourceImage, doctorImages, doctor, x, y, width, height) {
+      const doctorImage = doctorImages?.[doctor.id]
+
+      if (doctorImage) {
+        drawImageCover(ctx, doctorImage, x, y, width, height)
+        return
+      }
+
+      const crop = WEEKLY_TIMETABLE_DOCTOR_CROPS[doctor.id]
+
+      if (sourceImage && crop) {
+        ctx.drawImage(sourceImage, crop.x, crop.y, crop.width, crop.height, x, y, width, height)
+        return
+      }
+
+      ctx.fillStyle = '#f3f4f6'
+      ctx.fillRect(x, y, width, height)
+      drawTextInBox(ctx, doctor.name.slice(0, 1), x, y, width, height, {
+        font: 'bold 44px sans-serif',
+        color: '#6b7280',
+      })
+    }
+
+    function drawWeeklyTimetable(canvas, sourceImage, doctorImages, weekStartDate) {
+      const ctx = canvas.getContext('2d')
+      const dates = Array.from({ length: 7 }, (_, index) => addDays(weekStartDate, index))
+      const doctors = getActiveDoctors().slice(0, 6)
+      const weekEndDate = dates[6]
+      const canvasScale = canvas.width / 1080
+
+      const size = 1080
+      const titleHeight = 112
+      const gridX = 48
+      const headerY = 132
+      const rowY = 202
+      const photoWidth = 112
+      const nameWidth = 160
+      const sessionWidth = 55
+      const dayWidth = 94
+      const headerHeight = 70
+      const rowHeight = 141
+      const morningRowHeight = 52
+      const afternoonRowHeight = rowHeight - morningRowHeight
+      const dayStartX = gridX + photoWidth + nameWidth + sessionWidth
+      const tableRight = dayStartX + dayWidth * 7
+      const tableBottom = rowY + rowHeight * doctors.length
+
+      ctx.save()
+      ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0)
+      ctx.clearRect(0, 0, size, size)
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, size, size)
+
+      ctx.fillStyle = '#fff200'
+      ctx.fillRect(0, 0, size, titleHeight)
+      drawTextInBox(ctx, '의료진 진료 시간표', 0, 8, size, titleHeight - 8, {
+        font: '900 72px sans-serif',
+      })
+
+      drawTextInBox(ctx, `${formatTimetableDate(weekStartDate)} ~ ${formatTimetableShortDate(weekEndDate)}`, 70, 132, 250, headerHeight, {
+        font: 'bold 30px sans-serif',
+      })
+
+      ctx.strokeStyle = '#000000'
+      ctx.lineWidth = 2
+
+      dates.forEach((date, index) => {
+        const x = dayStartX + dayWidth * index
+        const day = getDayNumber(date)
+        const color = day === 0 || isPublicHoliday(date) ? '#ff0000' : day === 6 ? '#0057ff' : '#000000'
+
+        ctx.strokeRect(x, headerY, dayWidth, headerHeight)
+        drawTextInBox(ctx, `${formatTimetableShortDate(date)}\n${DAY_LABELS[day]}`, x, headerY + 4, dayWidth, headerHeight - 8, {
+          font: '900 26px sans-serif',
+          color,
+          lineHeight: 28,
+        })
+      })
+
+      doctors.forEach((doctor, doctorIndex) => {
+        const y = rowY + rowHeight * doctorIndex
+        const doctorColor = WEEKLY_TIMETABLE_DOCTOR_COLORS[doctor.id] || getDoctorColor(doctor.id).strong
+
+        drawDoctorPhoto(ctx, sourceImage, doctorImages, doctor, gridX, y, photoWidth, rowHeight)
+
+        ctx.fillStyle = doctorColor
+        ctx.fillRect(gridX + photoWidth, y, nameWidth, rowHeight)
+        drawTextInBox(ctx, doctor.name, gridX + photoWidth, y + 38, nameWidth, 42, {
+          font: '900 37px sans-serif',
+        })
+        drawTextInBox(ctx, '원장님', gridX + photoWidth, y + 82, nameWidth, 34, {
+          font: '900 24px sans-serif',
+        })
+
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(gridX + photoWidth + nameWidth, y, sessionWidth, rowHeight)
+        drawTextInBox(ctx, '오전', gridX + photoWidth + nameWidth, y + 2, sessionWidth, morningRowHeight, {
+          font: '900 24px sans-serif',
+        })
+        drawTextInBox(ctx, '오후', gridX + photoWidth + nameWidth, y + morningRowHeight + 2, sessionWidth, afternoonRowHeight, {
+          font: '900 24px sans-serif',
+        })
+
+        dates.forEach((date, dateIndex) => {
+          const x = dayStartX + dayWidth * dateIndex
+          const shift = getShift(doctor.id, date)
+          const status = shift?.status
+          const isWorking = isWorkingStatus(status) && !isClinicClosedDate(date)
+
+          ctx.fillStyle = isWorking ? doctorColor : '#ffffff'
+          ctx.fillRect(x, y, dayWidth, rowHeight)
+
+          if (isWorking) {
+            drawTextInBox(ctx, '진료', x, y + 2, dayWidth, morningRowHeight, {
+              font: '900 31px sans-serif',
+            })
+            const timeLabelY = y + morningRowHeight + 14
+            drawTextInBox(ctx, `~${status}시`, x, timeLabelY, dayWidth, 44, {
+              font: '900 31px sans-serif',
+            })
+
+            if (String(status) === '8') {
+              const nightLabelY = y + morningRowHeight + 54
+              ctx.fillStyle = '#000000'
+              ctx.fillRect(x + 18, nightLabelY, dayWidth - 36, 22)
+              drawTextInBox(ctx, '야간진료', x + 18, nightLabelY, dayWidth - 36, 22, {
+                font: '900 17px sans-serif',
+                color: '#fff200',
+              })
+            }
+          }
+
+          ctx.strokeStyle = '#555555'
+          ctx.lineWidth = 1
+          ctx.strokeRect(x, y, dayWidth, rowHeight)
+          ctx.beginPath()
+          ctx.moveTo(x, y + morningRowHeight)
+          ctx.lineTo(x + dayWidth, y + morningRowHeight)
+          ctx.stroke()
+        })
+
+        ctx.strokeStyle = '#555555'
+        ctx.lineWidth = 1
+        ctx.strokeRect(gridX, y, photoWidth, rowHeight)
+        ctx.strokeRect(gridX + photoWidth, y, nameWidth, rowHeight)
+        ctx.strokeRect(gridX + photoWidth + nameWidth, y, sessionWidth, rowHeight)
+        ctx.beginPath()
+        ctx.moveTo(gridX + photoWidth + nameWidth, y + morningRowHeight)
+        ctx.lineTo(gridX + photoWidth + nameWidth + sessionWidth, y + morningRowHeight)
+        ctx.stroke()
+
+        drawThickLine(ctx, gridX, y, tableRight, y)
+      })
+
+      drawThickLine(ctx, dayStartX, headerY, tableRight, headerY)
+      drawThickLine(ctx, dayStartX, headerY + headerHeight, tableRight, headerY + headerHeight)
+      drawThickLine(ctx, gridX, rowY, gridX, tableBottom)
+      drawThickLine(ctx, gridX + photoWidth, rowY, gridX + photoWidth, tableBottom, 3)
+      drawThickLine(ctx, gridX + photoWidth + nameWidth, rowY, gridX + photoWidth + nameWidth, tableBottom)
+      drawThickLine(ctx, dayStartX, headerY, dayStartX, tableBottom)
+      drawThickLine(ctx, tableRight, headerY, tableRight, tableBottom)
+      drawThickLine(ctx, gridX, tableBottom, tableRight, tableBottom)
+      ctx.restore()
+    }
+
+    async function openWeeklyTimetableModal(weekStartDate = getWeeklyTimetableWeekStart()) {
+      const modal = document.getElementById('weeklyTimetableModal')
+      const canvas = document.getElementById('weeklyTimetableCanvas')
+      const subtitle = document.getElementById('weeklyTimetableSubtitle')
+      const weekEndDate = addDays(weekStartDate, 6)
+
+      if (!modal || !canvas) return
+
+      selectedWeeklyTimetableWeekStart = weekStartDate
+      subtitle.textContent = `${formatTimetableDate(weekStartDate)} ~ ${formatTimetableShortDate(weekEndDate)}`
+      modal.classList.add('active')
+
+      try {
+        const [sourceImage, doctorImages] = await Promise.all([
+          loadWeeklyTimetableImage(),
+          loadWeeklyTimetableDoctorImages(),
+        ])
+        drawWeeklyTimetable(canvas, sourceImage, doctorImages, weekStartDate)
+      } catch (error) {
+        console.warn('기존 시간표 이미지를 불러오지 못해 사진 없이 생성합니다.', error)
+        drawWeeklyTimetable(canvas, null, null, weekStartDate)
+      }
+    }
+
+    function closeWeeklyTimetableModal() {
+      document.getElementById('weeklyTimetableModal').classList.remove('active')
+    }
+
+    function downloadWeeklyTimetablePng() {
+      const canvas = document.getElementById('weeklyTimetableCanvas')
+      const weekStartDate = selectedWeeklyTimetableWeekStart || getWeeklyTimetableWeekStart()
+      const a = document.createElement('a')
+
+      a.href = canvas.toDataURL('image/png')
+      a.download = `weekly-timetable-${weekStartDate}.png`
+      a.click()
+    }
+
+    function printWeeklyTimetable() {
+      const canvas = document.getElementById('weeklyTimetableCanvas')
+      const printWindow = window.open('', '_blank')
+      if (!printWindow) return
+
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>의료진 진료 시간표</title>
+            <style>
+              body { margin: 0; display: grid; place-items: center; min-height: 100vh; }
+              img { width: min(100vw, 100vh); height: auto; }
+              @media print { body { min-height: auto; } img { width: 100%; } }
+            </style>
+          </head>
+          <body>
+            <img src="${canvas.toDataURL('image/png')}" />
+            <script>window.onload = () => window.print()<\/script>
+          </body>
+        </html>
+      `)
+      printWindow.document.close()
     }
 
     function getDoctor(id) {
@@ -3947,6 +4359,7 @@
       const scheduleCheckCells = []
       const changeHistoryCells = []
       const memoCells = []
+      const timetableCells = []
       let weekStartIndex = 0
 
       for (let index = 0; index < dates.length; index += 1) {
@@ -4000,8 +4413,14 @@
         `)
 
         memoCells.push(`
-          <td colspan="${weekDates.length}" class="schedule-check-cell ${bottomWeekClass}">
+          <td colspan="${weekDates.length}" class="schedule-check-cell ${weekClass}">
             ${renderWeeklyMemoList(weekDates)}
+          </td>
+        `)
+
+        timetableCells.push(`
+          <td colspan="${weekDates.length}" class="schedule-check-cell ${bottomWeekClass}">
+            <button class="btn primary" type="button" style="padding:6px 10px;font-size:11px;" onclick="openWeeklyTimetableModal('${getWeekStartDate(weekDates[0])}')">주간 스케쥴표 생성</button>
           </td>
         `)
 
@@ -4011,6 +4430,7 @@
       const scheduleCheckRow = scheduleCheckCells.join('')
       const changeHistoryRow = changeHistoryCells.join('')
       const memoRow = memoCells.join('')
+      const timetableRow = timetableCells.join('')
 
       table.innerHTML = `
         <tr>
@@ -4037,6 +4457,10 @@
         <tr>
           <td>메모</td>
           ${memoRow}
+        </tr>
+        <tr>
+          <td>주간 스케쥴표</td>
+          ${timetableRow}
         </tr>
       `
     }
