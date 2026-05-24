@@ -3995,8 +3995,8 @@
         <div class="ledger-extra-cell">
           ${itemList}
           <div class="ledger-extra-form">
-            <input id="extraAccrualDate-${doctor.id}" class="input" type="date" value="${getTodayDateString()}" />
-            <input id="extraAccrualReason-${doctor.id}" class="input" type="text" placeholder="추가 발생 사유" />
+            <input id="extraAccrualDate-${doctor.id}" class="input" type="date" value="${getTodayDateString()}" onkeydown="handleExtraLeaveAccrualKeydown(event, '${doctor.id}')" />
+            <input id="extraAccrualReason-${doctor.id}" class="input" type="text" placeholder="추가 발생 사유" onkeydown="handleExtraLeaveAccrualKeydown(event, '${doctor.id}')" />
             <div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;">
               <button class="btn primary" type="button" onclick="saveExtraLeaveAccrual('${doctor.id}')">임시 등록</button>
               <button class="btn" type="button" onclick="closeExtraLeaveAccrualForm()">취소</button>
@@ -4030,6 +4030,13 @@
     function closeExtraLeaveAccrualForm() {
       state.activeExtraAccrualDoctorId = null
       renderLedger()
+    }
+
+    function handleExtraLeaveAccrualKeydown(event, doctorId) {
+      if (event.key !== 'Enter') return
+
+      event.preventDefault()
+      saveExtraLeaveAccrual(doctorId)
     }
 
     function saveExtraLeaveAccrual(doctorId) {
