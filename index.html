@@ -1164,10 +1164,6 @@
         <input id="fixedScheduleEffectiveDate" class="input" type="date" />
       </div>
 
-      <div class="actions" style="margin:8px 0 12px;">
-        <button class="btn primary" onclick="applyFixedScheduleChange()">변경한 고정스케쥴 반영</button>
-      </div>
-
       <div class="schedule-wrap">
         <table id="fixedScheduleTable" class="fixed-schedule-table"></table>
       </div>
@@ -3449,6 +3445,13 @@
         alert('적용 시작일을 선택해주세요.')
         return
       }
+
+      const password = await requestPassword({
+        title: '고정스케쥴 변경',
+        message: '고정스케쥴을 반영하려면 비밀번호를 입력해주세요.',
+      })
+
+      if (password === null) return
 
       state.fixedScheduleTemplate = readFixedScheduleTemplateFromModal()
       saveState()
