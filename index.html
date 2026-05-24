@@ -1379,6 +1379,17 @@
       '2026-12-25',
     ]
 
+    const CLINIC_CLOSED_DATES = [
+      '2026-02-16',
+      '2026-02-17',
+      '2026-02-18',
+      '2026-05-05',
+      '2026-09-24',
+      '2026-09-25',
+      '2026-09-26',
+      '2026-12-25',
+    ]
+
     function getDefaultFixedScheduleTemplate() {
       return {
         'choi': {
@@ -2412,6 +2423,10 @@
       return (state.publicHolidays || DEFAULT_PUBLIC_HOLIDAYS).includes(date)
     }
 
+    function isClinicClosedDate(date) {
+      return CLINIC_CLOSED_DATES.includes(date)
+    }
+
     function isShortDay(date) {
       const day = getDayNumber(date)
       return day === 0 || day === 6 || isPublicHoliday(date)
@@ -2728,7 +2743,9 @@
       const templateStatus = template[doctor.id]?.[day]
       let status = templateStatus || '휴무'
 
-      if (templateStatus && isPublicHoliday(date)) {
+      if (isClinicClosedDate(date)) {
+        status = '휴무'
+      } else if (templateStatus && isPublicHoliday(date)) {
         status = '2'
       }
 
@@ -3373,7 +3390,9 @@
         const templateStatus = template[doctor.id]?.[day]
         let nextStatus = templateStatus || '휴무'
 
-        if (templateStatus && isPublicHoliday(shift.date)) {
+        if (isClinicClosedDate(shift.date)) {
+          nextStatus = '휴무'
+        } else if (templateStatus && isPublicHoliday(shift.date)) {
           nextStatus = '2'
         }
 
@@ -4260,9 +4279,22 @@
       let changed = false
 
       for (const date of visibleDates) {
-        if (!isPublicHoliday(date)) continue
-
         const shifts = getShiftsByDate(date)
+
+        if (isClinicClosedDate(date)) {
+          for (const shift of shifts) {
+            if (shift.status === '휴무' && shift.source === '휴원반영') continue
+
+            shift.status = '휴무'
+            shift.source = '휴원반영'
+            shift.memo = ''
+            changed = true
+          }
+
+          continue
+        }
+
+        if (!isPublicHoliday(date)) continue
 
         for (const shift of shifts) {
           if (shift.source === '수동수정') continue
