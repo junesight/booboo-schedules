@@ -1059,6 +1059,12 @@
               </div>
               <div class="list-item">
                 <div>
+                  <strong>전체 휴진일</strong>
+                  <div class="muted">매년 어린이날과 크리스마스는 전체 휴진입니다. 설 연휴 3일과 추석 연휴 3일도 공휴일 이름을 기준으로 전체 휴진 처리하며, 해당 날짜는 최소 인원 검증에서 제외합니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
                   <strong>일별 최소 진료 인원</strong>
                   <div class="muted">기본 기준은 4명입니다. 평일 중 화요일·목요일은 최소 3명 이상이면 정상으로 판단합니다.</div>
                 </div>
@@ -1379,7 +1385,7 @@
       '2026-12-25',
     ]
 
-    const CLINIC_CLOSED_DATES = [
+    const DEFAULT_CLINIC_CLOSED_DATES = [
       '2026-02-16',
       '2026-02-17',
       '2026-02-18',
@@ -1389,6 +1395,15 @@
       '2026-09-26',
       '2026-12-25',
     ]
+
+    const CLINIC_CLOSED_FIXED_MONTH_DAYS = ['05-05', '12-25']
+    const CLINIC_CLOSED_HOLIDAY_NAME_PATTERNS = ['설날', '설연휴', '설날 연휴', '추석', 'Seollal', 'Korean New Year', 'Chuseok']
+
+    function isClinicClosedHolidayName(name) {
+      return CLINIC_CLOSED_HOLIDAY_NAME_PATTERNS.some((pattern) => (
+        String(name || '').toLowerCase().includes(pattern.toLowerCase())
+      ))
+    }
 
     function getDefaultFixedScheduleTemplate() {
       return {
@@ -1469,6 +1484,7 @@
       fixedScheduleTemplate: getDefaultFixedScheduleTemplate(),
       targetDoctorCount: 4,
       publicHolidays: DEFAULT_PUBLIC_HOLIDAYS,
+      clinicClosedDates: DEFAULT_CLINIC_CLOSED_DATES,
       doctors: [
         {
           id: 'choi',
@@ -1655,6 +1671,7 @@
     state.selectedMonth = getMonthKey(state.viewStartDate)
     state.extraLeaveAccruals = state.extraLeaveAccruals || []
     state.weeklyMemos = state.weeklyMemos || []
+    state.clinicClosedDates = state.clinicClosedDates || DEFAULT_CLINIC_CLOSED_DATES
     state.doctorManageMode = false
     state.editingDoctorId = null
     state.activeExtraAccrualDoctorId = state.activeExtraAccrualDoctorId || null
@@ -1853,7 +1870,15 @@
 
         if (Array.isArray(holidaysResult.data)) {
           const supabaseHolidays = holidaysResult.data.map((holiday) => holiday.date).filter(Boolean)
+          const supabaseClinicClosedDates = holidaysResult.data
+            .filter((holiday) => (
+              CLINIC_CLOSED_FIXED_MONTH_DAYS.includes(String(holiday.date || '').slice(5)) ||
+              isClinicClosedHolidayName(holiday.name)
+            ))
+            .map((holiday) => holiday.date)
+            .filter(Boolean)
           state.publicHolidays = [...new Set([...DEFAULT_PUBLIC_HOLIDAYS, ...supabaseHolidays])]
+          state.clinicClosedDates = [...new Set([...(state.clinicClosedDates || []), ...DEFAULT_CLINIC_CLOSED_DATES, ...supabaseClinicClosedDates])]
         }
 
         if (Array.isArray(fixedSchedulesResult.data) && fixedSchedulesResult.data.length > 0) {
@@ -2424,7 +2449,10 @@
     }
 
     function isClinicClosedDate(date) {
-      return CLINIC_CLOSED_DATES.includes(date)
+      return (
+        CLINIC_CLOSED_FIXED_MONTH_DAYS.includes(String(date).slice(5)) ||
+        (state.clinicClosedDates || DEFAULT_CLINIC_CLOSED_DATES).includes(date)
+      )
     }
 
     function isShortDay(date) {
@@ -4250,6 +4278,7 @@
 
     async function fetchPublicHolidaysFromApi(year) {
       const fallbackHolidays = DEFAULT_PUBLIC_HOLIDAYS.filter((date) => date.startsWith(String(year)))
+      const fallbackClinicClosedDates = DEFAULT_CLINIC_CLOSED_DATES.filter((date) => date.startsWith(String(year)))
 
       try {
         const apiUrl = 'https:' + '//date.nager.at/api/v3/PublicHolidays/' + year + '/KR'
@@ -4261,11 +4290,24 @@
 
         const holidays = await response.json()
         const apiHolidays = holidays.map((holiday) => holiday.date)
+        const apiClinicClosedDates = holidays
+          .filter((holiday) => (
+            CLINIC_CLOSED_FIXED_MONTH_DAYS.includes(String(holiday.date || '').slice(5)) ||
+            isClinicClosedHolidayName(holiday.localName) ||
+            isClinicClosedHolidayName(holiday.name)
+          ))
+          .map((holiday) => holiday.date)
 
-        return [...new Set([...fallbackHolidays, ...apiHolidays])]
+        return {
+          holidays: [...new Set([...fallbackHolidays, ...apiHolidays])],
+          clinicClosedDates: [...new Set([...fallbackClinicClosedDates, ...apiClinicClosedDates])],
+        }
       } catch (error) {
         console.warn('공휴일 API를 불러오지 못해 기본 공휴일 목록을 사용합니다.', error)
-        return fallbackHolidays
+        return {
+          holidays: fallbackHolidays,
+          clinicClosedDates: fallbackClinicClosedDates,
+        }
       }
     }
 
@@ -4273,11 +4315,12 @@
       const visibleDates = getVisibleDates()
       const years = [...new Set(visibleDates.map((date) => Number(date.slice(0, 4))))]
 
-      const holidayLists = await Promise.all(
+      const holidayResults = await Promise.all(
         years.map((year) => fetchPublicHolidaysFromApi(year))
       )
 
-      state.publicHolidays = [...new Set([...(state.publicHolidays || []), ...holidayLists.flat()])]
+      state.publicHolidays = [...new Set([...(state.publicHolidays || []), ...holidayResults.flatMap((result) => result.holidays)])]
+      state.clinicClosedDates = [...new Set([...(state.clinicClosedDates || []), ...DEFAULT_CLINIC_CLOSED_DATES, ...holidayResults.flatMap((result) => result.clinicClosedDates)])]
       saveState()
     }
 
