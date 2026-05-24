@@ -3219,6 +3219,39 @@
         return
       }
 
+      const existingReverseSwapIndex = (state.swaps || []).findIndex((swap) => (
+        swap.status === '승인' &&
+        swap.requesterDate === sourceShift.date &&
+        swap.partnerDate === sourceShift.date &&
+        swap.requesterId === targetDoctorId &&
+        swap.partnerId === sourceShift.doctorId
+      ))
+
+      if (existingReverseSwapIndex >= 0) {
+        const template = getFixedScheduleTemplate()
+        const sourceDoctor = getDoctor(sourceShift.doctorId)
+
+        if (sourceDoctor) {
+          const defaultSourceShift = createDefaultShift(sourceDoctor, sourceShift.date, template)
+          sourceShift.status = defaultSourceShift.status
+          sourceShift.source = defaultSourceShift.source
+          sourceShift.memo = ''
+        }
+
+        const defaultTargetShift = createDefaultShift(targetDoctor, targetShift.date, template)
+        targetShift.status = defaultTargetShift.status
+        targetShift.source = defaultTargetShift.source
+        targetShift.memo = ''
+
+        state.swaps.splice(existingReverseSwapIndex, 1)
+
+        saveState()
+        markUnsavedChanges()
+        closeShiftModal()
+        renderAll()
+        return
+      }
+
       const movedStatus = sourceShift.status
       sourceShift.status = '휴무'
       sourceShift.source = '스왑반영'
