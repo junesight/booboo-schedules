@@ -1864,6 +1864,12 @@
               console.warn('스왑 데이터를 해석하지 못했습니다.', error)
             }
           }
+
+          const lastSaveTimeSetting = settingsResult.data.find((item) => item.key === 'lastSaveTime')
+          if (lastSaveTimeSetting?.value) {
+            const lastSaveTime = String(lastSaveTimeSetting.value).replace(/^"|"$/g, '')
+            safeSetItem(LAST_SAVE_TIME_KEY, lastSaveTime)
+          }
         }
 
         saveState()
@@ -2035,6 +2041,23 @@
       }
     }
 
+    async function saveLastSaveTimeToSupabase(value) {
+      try {
+        const { error } = await db
+          .from('settings')
+          .upsert({
+            key: 'lastSaveTime',
+            value,
+          }, { onConflict: 'key' })
+
+        if (error) throw error
+        return true
+      } catch (error) {
+        console.warn('Supabase에 최종 저장 시간을 저장하지 못했습니다.', error)
+        return false
+      }
+    }
+
     function setSyncStatus(message, type = 'yellow') {
       const target = document.getElementById('syncStatus')
       if (!target) return
@@ -2063,8 +2086,8 @@
       target.textContent = `최종 저장 시간 : ${formatSaveTime(safeGetItem(LAST_SAVE_TIME_KEY))}`
     }
 
-    function updateLastSaveTime() {
-      safeSetItem(LAST_SAVE_TIME_KEY, new Date().toISOString())
+    function updateLastSaveTime(value = new Date().toISOString()) {
+      safeSetItem(LAST_SAVE_TIME_KEY, value)
       renderLastSaveTime()
     }
 
@@ -2199,8 +2222,15 @@
         saveSwapsToSupabase(),
       ])
 
+      let lastSaveTimeSaved = false
+      const nextLastSaveTime = new Date().toISOString()
+
       if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved) {
-        updateLastSaveTime()
+        lastSaveTimeSaved = await saveLastSaveTimeToSupabase(nextLastSaveTime)
+      }
+
+      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved) {
+        updateLastSaveTime(nextLastSaveTime)
         clearUnsavedChanges()
         setLastSyncedState()
         await loadDataFromSupabase()
@@ -2208,16 +2238,16 @@
       }
 
       setSyncStatus(
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved ? 'green' : 'red'
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved ? 'green' : 'red'
       )
 
-      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved
+      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved
         ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 진료의 설정, 고정스케쥴, 추가 발생, 메모, 스왑 데이터를 Supabase에 저장하고 동기화했습니다.`
         : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
 
-      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved
+      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved
     }
 
     async function resetData() {
@@ -2582,7 +2612,7 @@
       const memoList = memos.length === 0
         ? '<div class="muted" style="font-size:11px;text-align:center;">-</div>'
         : `
-          <div style="display:grid;gap:4px;font-size:11px;line-height:1.35;">
+          <div style="display:grid;gap:4px;font-size:11px;line-height:1.35;text-align:left;">
             ${memos.map((memo) => `
               <div>
                 <span class="muted">${escapeHtml(formatMemoCreatedAt(memo.createdAt))}</span>
