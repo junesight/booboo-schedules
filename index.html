@@ -2553,15 +2553,19 @@
     }
 
     function drawTextInBox(ctx, text, x, y, width, height, {
-      font = 'bold 28px sans-serif',
+      font = '900 28px sans-serif',
       color = '#000000',
       align = 'center',
       baseline = 'middle',
       lineHeight = 34,
+      strokeWidth = 0.8,
     } = {}) {
       const lines = String(text || '').split('\n')
       ctx.save()
       ctx.fillStyle = color
+      ctx.strokeStyle = color
+      ctx.lineJoin = 'round'
+      ctx.lineWidth = strokeWidth
       ctx.font = font
       ctx.textAlign = align
       ctx.textBaseline = baseline
@@ -2571,7 +2575,41 @@
       const startY = y + height / 2 - totalHeight / 2
 
       lines.forEach((line, index) => {
+        if (strokeWidth > 0) {
+          ctx.strokeText(line, textX, startY + index * lineHeight)
+        }
         ctx.fillText(line, textX, startY + index * lineHeight)
+      })
+
+      ctx.restore()
+    }
+
+    function drawSpacedTextInBox(ctx, text, x, y, width, height, {
+      font = '900 28px sans-serif',
+      color = '#000000',
+      letterSpacing = 0,
+      strokeWidth = 0.8,
+    } = {}) {
+      const chars = Array.from(String(text || ''))
+
+      ctx.save()
+      ctx.font = font
+      ctx.fillStyle = color
+      ctx.strokeStyle = color
+      ctx.lineJoin = 'round'
+      ctx.lineWidth = strokeWidth
+      ctx.textBaseline = 'middle'
+
+      const textWidth = chars.reduce((sum, char) => sum + ctx.measureText(char).width, 0) + letterSpacing * Math.max(chars.length - 1, 0)
+      let cursorX = x + (width - textWidth) / 2
+      const textY = y + height / 2
+
+      chars.forEach((char) => {
+        if (strokeWidth > 0) {
+          ctx.strokeText(char, cursorX, textY)
+        }
+        ctx.fillText(char, cursorX, textY)
+        cursorX += ctx.measureText(char).width + letterSpacing
       })
 
       ctx.restore()
@@ -2625,7 +2663,7 @@
       ctx.fillStyle = '#f3f4f6'
       ctx.fillRect(x, y, width, height)
       drawTextInBox(ctx, doctor.name.slice(0, 1), x, y, width, height, {
-        font: 'bold 44px sans-serif',
+        font: '900 44px sans-serif',
         color: '#6b7280',
       })
     }
@@ -2662,12 +2700,14 @@
 
       ctx.fillStyle = '#fff200'
       ctx.fillRect(0, 0, size, titleHeight)
-      drawTextInBox(ctx, '의료진 진료 시간표', 0, 8, size, titleHeight - 8, {
-        font: '900 72px sans-serif',
+      drawSpacedTextInBox(ctx, '의료진 진료 시간표', 0, 8, size, titleHeight - 8, {
+        font: '900 88px sans-serif',
+        letterSpacing: 2,
+        strokeWidth: 0.9,
       })
 
       drawTextInBox(ctx, `${formatTimetableDate(weekStartDate)} ~ ${formatTimetableShortDate(weekEndDate)}`, 70, 132, 250, headerHeight, {
-        font: 'bold 30px sans-serif',
+        font: '900 30px sans-serif',
       })
 
       ctx.strokeStyle = '#000000'
@@ -2694,10 +2734,11 @@
 
         ctx.fillStyle = doctorColor
         ctx.fillRect(gridX + photoWidth, y, nameWidth, rowHeight)
-        drawTextInBox(ctx, doctor.name, gridX + photoWidth, y + 38, nameWidth, 42, {
-          font: '900 37px sans-serif',
+        drawSpacedTextInBox(ctx, doctor.name, gridX + photoWidth, y + 36, nameWidth, 46, {
+          font: '900 41px sans-serif',
+          letterSpacing: 1,
         })
-        drawTextInBox(ctx, '원장님', gridX + photoWidth, y + 82, nameWidth, 34, {
+        drawTextInBox(ctx, '원장님', gridX + photoWidth, y + 84, nameWidth, 34, {
           font: '900 24px sans-serif',
         })
 
@@ -2820,9 +2861,14 @@
           <head>
             <title>의료진 진료 시간표</title>
             <style>
-              body { margin: 0; display: grid; place-items: center; min-height: 100vh; }
-              img { width: min(100vw, 100vh); height: auto; }
-              @media print { body { min-height: auto; } img { width: 100%; } }
+              @page { size: A4 portrait; margin: 0; }
+              html, body { margin: 0; padding: 0; background: white; }
+              body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
+              img { width: min(100vw, 100vh); height: auto; display: block; }
+              @media print {
+                body { min-height: auto; align-items: flex-start; }
+                img { width: 210mm; height: 210mm; object-fit: contain; }
+              }
             </style>
           </head>
           <body>
