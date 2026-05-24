@@ -1350,6 +1350,23 @@
     </div>
   </div>
 
+  <div id="confirmModal" class="modal-backdrop">
+    <div class="modal">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="confirmModalTitle">확인</div>
+          <div class="muted" id="confirmModalMessage">계속 진행할까요?</div>
+        </div>
+        <button class="close" onclick="cancelConfirmModal()">×</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onclick="cancelConfirmModal()">취소</button>
+        <button class="btn danger" id="confirmModalConfirmButton" onclick="confirmConfirmModal()">확인</button>
+      </div>
+    </div>
+  </div>
+
   <div id="doctorModal" class="modal-backdrop">
     <div class="modal">
       <div class="modal-head">
@@ -1447,6 +1464,7 @@
     }
     let pendingNavigationDate = null
     let pendingPasswordResolver = null
+    let pendingConfirmResolver = null
     let currentVisibleDayCount = null
     let responsiveScheduleTimer = null
     let weeklyTimetableImage = null
@@ -2376,6 +2394,41 @@
       resolvePasswordModal(input.value)
     }
 
+    function requestConfirmation({
+      title = '확인',
+      message = '계속 진행할까요?',
+      confirmText = '확인',
+    } = {}) {
+      const modal = document.getElementById('confirmModal')
+
+      document.getElementById('confirmModalTitle').textContent = title
+      document.getElementById('confirmModalMessage').textContent = message
+      document.getElementById('confirmModalConfirmButton').textContent = confirmText
+      modal.classList.add('active')
+
+      return new Promise((resolve) => {
+        pendingConfirmResolver = resolve
+      })
+    }
+
+    function resolveConfirmModal(value) {
+      const modal = document.getElementById('confirmModal')
+      modal.classList.remove('active')
+
+      if (pendingConfirmResolver) {
+        pendingConfirmResolver(value)
+        pendingConfirmResolver = null
+      }
+    }
+
+    function cancelConfirmModal() {
+      resolveConfirmModal(false)
+    }
+
+    function confirmConfirmModal() {
+      resolveConfirmModal(true)
+    }
+
     function handlePasswordKeydown(event) {
       if (event.key !== 'Enter') return
 
@@ -2489,7 +2542,13 @@
     }
 
     async function resetData() {
-      if (!confirm('마지막으로 저장하고 동기화한 지점으로 되돌릴까요?')) return
+      const confirmed = await requestConfirmation({
+        title: '리셋',
+        message: '마지막으로 저장하고 동기화한 지점으로 되돌릴까요?',
+        confirmText: '리셋',
+      })
+
+      if (!confirmed) return
 
       const snapshot = getLastSyncedState()
 
