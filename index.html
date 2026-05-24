@@ -1271,7 +1271,7 @@
 
       <div class="actions" style="margin-top:16px;">
         <button class="btn" onclick="closeWeeklyTimetableModal()">닫기</button>
-        <button class="btn" onclick="printWeeklyTimetable()">인쇄</button>
+        <button class="btn" onclick="printWeeklyTimetable()">A4 인쇄</button>
         <button class="btn primary" onclick="downloadWeeklyTimetablePng()">PNG 저장</button>
       </div>
     </div>
@@ -4466,7 +4466,7 @@
 
         timetableCells.push(`
           <td colspan="${weekDates.length}" class="schedule-check-cell ${bottomWeekClass}">
-            <button class="btn primary" type="button" style="padding:6px 10px;font-size:11px;" onclick="openWeeklyTimetableModal('${getWeekStartDate(weekDates[0])}')">주간 스케쥴표 생성</button>
+            <button class="btn" type="button" style="padding:6px 10px;font-size:11px;" onclick="openWeeklyTimetableModal('${getWeekStartDate(weekDates[0])}')">주간 스케쥴표 생성</button>
           </td>
         `)
 
