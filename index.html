@@ -1554,6 +1554,32 @@
       return lastSyncedState || loadLastSyncedState()
     }
 
+    function getSavableSnapshot(snapshot = state) {
+      const sortById = (items = []) => [...items].sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')))
+      const sortShifts = (items = []) => [...items].sort((a, b) => (
+        String(a.date || '').localeCompare(String(b.date || '')) ||
+        String(a.doctorId || '').localeCompare(String(b.doctorId || '')) ||
+        String(a.id || '').localeCompare(String(b.id || ''))
+      ))
+
+      return {
+        doctors: sortById(snapshot.doctors || []),
+        shifts: sortShifts(snapshot.shifts || []),
+        fixedScheduleTemplate: snapshot.fixedScheduleTemplate || {},
+        targetDoctorCount: snapshot.targetDoctorCount,
+        extraLeaveAccruals: sortById(snapshot.extraLeaveAccruals || []),
+        weeklyMemos: sortById(snapshot.weeklyMemos || []),
+        swaps: sortById(snapshot.swaps || []),
+      }
+    }
+
+    function hasMeaningfulUnsavedChanges() {
+      const snapshot = getLastSyncedState()
+      if (!snapshot) return true
+
+      return JSON.stringify(getSavableSnapshot(state)) !== JSON.stringify(getSavableSnapshot(snapshot))
+    }
+
     function markUnsavedChanges() {
       safeSetItem(UNSAVED_CHANGES_KEY, 'true')
       setSyncStatus('수정됨 · 저장 필요', 'yellow')
@@ -1564,7 +1590,11 @@
     }
 
     function hasUnsavedChanges() {
-      return safeGetItem(UNSAVED_CHANGES_KEY) === 'true'
+      if (safeGetItem(UNSAVED_CHANGES_KEY) !== 'true') return false
+      if (hasMeaningfulUnsavedChanges()) return true
+
+      clearUnsavedChanges()
+      return false
     }
 
     function safeGetItem(key) {
@@ -2159,7 +2189,6 @@
 
       if (generatedAfterSync || repairedAfterSync) {
         saveState()
-        markUnsavedChanges()
       }
 
       renderAll()
@@ -4263,10 +4292,6 @@
       const repairedEmptySchedule = repairVisibleScheduleIfEmpty()
       normalizePublicHolidayShiftsForVisibleDates()
       renderAll()
-
-      if (generatedMissingSchedule || repairedEmptySchedule) {
-        markUnsavedChanges()
-      }
 
       setSyncStatus('로컬 표시 중', 'yellow')
 
