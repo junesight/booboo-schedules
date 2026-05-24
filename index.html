@@ -3075,7 +3075,7 @@
         const sevenCount = workingShifts.filter((shift) => shift.status === '7').length
 
         if (nightCount !== 1 || sevenCount < 1) {
-          warnings.push(`[확인 요망] ${formatKoreanDate(date)}에 퇴근 시간이 규칙에 어긋납니다.`)
+          warnings.push(`[확인 요망] ${date} 퇴근 시간이 규칙에 어긋납니다.`)
         }
       }
 
