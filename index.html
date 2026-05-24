@@ -1152,8 +1152,8 @@
               </div>
               <div class="list-item">
                 <div>
-                  <strong>일별 최소 진료 인원</strong>
-                  <div class="muted">기본 기준은 4명입니다. 평일 중 화요일·목요일은 최소 3명 이상이면 정상으로 판단합니다.</div>
+                  <strong>일별 진료 인원</strong>
+                  <div class="muted">기본 최소 기준은 4명입니다. 평일 중 화요일·목요일은 최소 3명 이상이면 정상으로 판단하되 노란색으로 표시합니다. 진료 인원이 5명 이상이면 최대 인원 초과로 보고 빨간색으로 표시합니다.</div>
                 </div>
               </div>
               <div class="list-item">
@@ -1170,6 +1170,12 @@
               </div>
               <div class="list-item">
                 <div>
+                  <strong>연속 근무 검증</strong>
+                  <div class="muted">한 진료의가 6일 이상 연속 근무하면 이상 감지에 경고를 표시합니다. 연속 근무가 여러 주에 걸쳐 이어지는 경우 마지막 근무일이 포함된 주에만 가장 긴 연속 근무일수를 표시합니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
                   <strong>연차 사용</strong>
                   <div class="muted">월간 진료표에서 연차사용으로 바꾼 날짜만 근태관리의 사용 내역과 총 사용일수에 반영합니다.</div>
                 </div>
@@ -1178,6 +1184,18 @@
                 <div>
                   <strong>1:1 스왑</strong>
                   <div class="muted">근무 중인 칸에서만 신청할 수 있고, 해당 날짜에 휴무인 원장님만 대상으로 선택할 수 있습니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>주간 스케쥴표</strong>
+                  <div class="muted">각 주의 메모 아래에서 주간 스케쥴표를 생성할 수 있습니다. PNG 저장은 2160×2160 정사각형으로 생성하고, A4 인쇄는 페이지 상단에 맞춰 출력합니다.</div>
+                </div>
+              </div>
+              <div class="list-item">
+                <div>
+                  <strong>기본 보기 위치</strong>
+                  <div class="muted">앱을 열면 항상 이번주가 가장 좌측에 오도록 표시합니다. 주가 바뀌면 새 이번주가 좌측 첫 주가 되도록 자동 갱신합니다.</div>
                 </div>
               </div>
               <div class="list-item">
@@ -3064,7 +3082,11 @@
       const minimumRequiredCount = getMinimumRequiredCount(date)
 
       if (workingShifts.length < minimumRequiredCount) {
-        warnings.push(`[확인 요망] ${formatKoreanDate(date)}에 최소 인원이 충족되지 않았습니다.`)
+        warnings.push(`[확인 요망] ${date} 최소 인원이 충족되지 않았습니다.`)
+      }
+
+      if (workingShifts.length >= 5) {
+        warnings.push(`[확인 요망] ${date} 최대 인원을 초과했습니다.`)
       }
 
       return warnings
@@ -4468,8 +4490,11 @@
         const count = getShiftsByDate(date).filter((shift) => isWorkingStatus(shift.status)).length
         const minimumRequiredCount = getMinimumRequiredCount(date)
         const ok = count >= minimumRequiredCount
+        const overMaximumCount = count >= 5
         const isThreeDoctorNormalDay = !isPublicHoliday(date) && (day === 2 || day === 4) && count === 3
-        const countClass = ok
+        const countClass = overMaximumCount
+          ? 'count-bad'
+          : ok
           ? isThreeDoctorNormalDay ? 'count-warning' : 'count-ok'
           : 'count-bad'
 
