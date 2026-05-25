@@ -2862,9 +2862,11 @@
 
             if (String(status) === '8') {
               const nightLabelY = y + morningRowHeight + 54
+              const nightLabelX = x + 12
+              const nightLabelWidth = dayWidth - 24
               ctx.fillStyle = '#000000'
-              ctx.fillRect(x + 18, nightLabelY, dayWidth - 36, 22)
-              drawTextInBox(ctx, '야간진료', x + 18, nightLabelY, dayWidth - 36, 22, {
+              ctx.fillRect(nightLabelX, nightLabelY, nightLabelWidth, 22)
+              drawTextInBox(ctx, '야간진료', nightLabelX, nightLabelY, nightLabelWidth, 22, {
                 font: '900 17px sans-serif',
                 color: '#fff200',
               })
@@ -2957,7 +2959,7 @@
               body { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; }
               img { width: min(100vw, 100vh); height: auto; display: block; }
               @media print {
-                body { min-height: auto; align-items: flex-start; }
+                body { min-height: auto; align-items: flex-start; padding-top: 4mm; }
                 img { width: 210mm; height: 210mm; object-fit: contain; }
               }
             </style>
