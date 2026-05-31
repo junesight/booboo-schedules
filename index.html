@@ -1435,6 +1435,7 @@
     const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토']
     const SCHEDULE_DATA_START_DATE = '2026-05-18'
     const DOCTOR_ORDER = ['choi', 'kim-jun', 'kim-young', 'park', 'ahn', 'hwang']
+    const SCHEDULE_CONFIRMATION_DOCTOR_IDS = ['kim-young', 'park', 'ahn', 'hwang']
     const WEEKLY_TIMETABLE_SOURCE_IMAGE = 'assets/weekly-template-source.png'
     const WEEKLY_TIMETABLE_DOCTOR_IMAGES = {
       'choi': 'assets/doctors/choi.png',
@@ -1733,6 +1734,7 @@
       swaps: [],
       extraLeaveAccruals: [],
       weeklyMemos: [],
+      scheduleConfirmations: [],
       doctorManageMode: false,
       editingDoctorId: null,
       activeExtraAccrualDoctorId: null,
@@ -1784,6 +1786,7 @@
         targetDoctorCount: snapshot.targetDoctorCount,
         extraLeaveAccruals: sortById(snapshot.extraLeaveAccruals || []),
         weeklyMemos: sortById(snapshot.weeklyMemos || []),
+        scheduleConfirmations: sortById(snapshot.scheduleConfirmations || []),
         swaps: sortById(snapshot.swaps || []),
       }
     }
@@ -1846,6 +1849,7 @@
     state.selectedMonth = getMonthKey(state.viewStartDate)
     state.extraLeaveAccruals = state.extraLeaveAccruals || []
     state.weeklyMemos = state.weeklyMemos || []
+    state.scheduleConfirmations = state.scheduleConfirmations || []
     state.clinicClosedDates = state.clinicClosedDates || DEFAULT_CLINIC_CLOSED_DATES
     state.doctorManageMode = false
     state.editingDoctorId = null
@@ -2106,6 +2110,20 @@
             }
           }
 
+          const scheduleConfirmationsSetting = settingsResult.data.find((item) => item.key === 'scheduleConfirmations')
+          if (scheduleConfirmationsSetting?.value) {
+            try {
+              const scheduleConfirmations = Array.isArray(scheduleConfirmationsSetting.value)
+                ? scheduleConfirmationsSetting.value
+                : JSON.parse(scheduleConfirmationsSetting.value)
+              if (Array.isArray(scheduleConfirmations)) {
+                state.scheduleConfirmations = scheduleConfirmations
+              }
+            } catch (error) {
+              console.warn('스케쥴 확인 데이터를 해석하지 못했습니다.', error)
+            }
+          }
+
           const swapsSetting = settingsResult.data.find((item) => item.key === 'swaps')
           if (swapsSetting?.value) {
             try {
@@ -2276,6 +2294,70 @@
       } catch (error) {
         console.warn('Supabase에 주간 메모 데이터를 저장하지 못했습니다.', error)
         return false
+      }
+    }
+
+    async function saveScheduleConfirmationsToSupabase() {
+      try {
+        const { error } = await db
+          .from('settings')
+          .upsert({
+            key: 'scheduleConfirmations',
+            value: JSON.stringify(state.scheduleConfirmations || []),
+          }, { onConflict: 'key' })
+
+        if (error) throw error
+        return true
+      } catch (error) {
+        console.warn('Supabase에 스케쥴 확인 데이터를 저장하지 못했습니다.', error)
+        return false
+      }
+    }
+
+    async function loadScheduleConfirmationsFromSupabase({ render = true } = {}) {
+      try {
+        const { data, error } = await db
+          .from('settings')
+          .select('value')
+          .eq('key', 'scheduleConfirmations')
+          .limit(1)
+
+        if (error) throw error
+
+        const value = data?.[0]?.value
+        if (!value) return true
+
+        const scheduleConfirmations = Array.isArray(value) ? value : JSON.parse(value)
+        if (Array.isArray(scheduleConfirmations)) {
+          state.scheduleConfirmations = scheduleConfirmations
+          saveState()
+          if (render) {
+            renderScheduleTable()
+          }
+        }
+
+        return true
+      } catch (error) {
+        console.warn('Supabase에서 스케쥴 확인 데이터를 불러오지 못했습니다.', error)
+        return false
+      }
+    }
+
+    function subscribeScheduleConfirmationsRealtime() {
+      try {
+        db
+          .channel('schedule-confirmations')
+          .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'settings',
+            filter: 'key=eq.scheduleConfirmations',
+          }, () => {
+            loadScheduleConfirmationsFromSupabase({ render: true })
+          })
+          .subscribe()
+      } catch (error) {
+        console.warn('스케쥴 확인 실시간 구독을 시작하지 못했습니다.', error)
       }
     }
 
@@ -2502,23 +2584,24 @@
         shift.date >= SCHEDULE_DATA_START_DATE
       ))
 
-      const [scheduleSaved, fixedScheduleSaved, doctorsSaved, extraLeaveAccrualsSaved, weeklyMemosSaved, swapsSaved] = await Promise.all([
+      const [scheduleSaved, fixedScheduleSaved, doctorsSaved, extraLeaveAccrualsSaved, weeklyMemosSaved, scheduleConfirmationsSaved, swapsSaved] = await Promise.all([
         saveSchedulesToSupabase(schedulesToSave),
         saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate),
         saveDoctorsToSupabase(),
         saveExtraLeaveAccrualsToSupabase(),
         saveWeeklyMemosToSupabase(),
+        saveScheduleConfirmationsToSupabase(),
         saveSwapsToSupabase(),
       ])
 
       let lastSaveTimeSaved = false
       const nextLastSaveTime = new Date().toISOString()
 
-      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved) {
+      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved) {
         lastSaveTimeSaved = await saveLastSaveTimeToSupabase(nextLastSaveTime)
       }
 
-      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved) {
+      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved) {
         updateLastSaveTime(nextLastSaveTime)
         clearUnsavedChanges()
         setLastSyncedState()
@@ -2527,16 +2610,16 @@
       }
 
       setSyncStatus(
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved ? 'green' : 'red'
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
+        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved ? 'green' : 'red'
       )
 
-      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved
-        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 진료의 설정, 고정스케쥴, 추가 발생, 메모, 스왑 데이터를 Supabase에 저장하고 동기화했습니다.`
+      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved
+        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 진료의 설정, 고정스케쥴, 추가 발생, 메모, 확인, 스왑 데이터를 Supabase에 저장하고 동기화했습니다.`
         : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
       )
 
-      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && swapsSaved && lastSaveTimeSaved
+      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved
     }
 
     async function resetData() {
@@ -3456,6 +3539,93 @@
       saveState()
       markUnsavedChanges()
       renderAll()
+    }
+
+    function isScheduleConfirmed(weekStartDate, doctorId) {
+      return (state.scheduleConfirmations || []).some((item) => (
+        item.weekStartDate === weekStartDate && item.doctorId === doctorId
+      ))
+    }
+
+    function mergeScheduleConfirmations(confirmations) {
+      return Object.values((confirmations || []).reduce((map, item) => {
+        if (!item?.weekStartDate || !item?.doctorId) return map
+
+        const id = item.id || `${item.weekStartDate}-${item.doctorId}`
+        map[id] = {
+          ...item,
+          id,
+        }
+        return map
+      }, {})).sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    }
+
+    function shouldShowScheduleConfirmationButtons(weekStartDate) {
+      const currentWeekStart = getCurrentWeekStart()
+      const lastConfirmWeekStart = addDays(currentWeekStart, 14)
+
+      return weekStartDate >= currentWeekStart && weekStartDate <= lastConfirmWeekStart
+    }
+
+    function renderScheduleConfirmationList(weekDates) {
+      const weekStartDate = getWeekStartDate(weekDates[0])
+      if (!shouldShowScheduleConfirmationButtons(weekStartDate)) {
+        return `<span class="muted">-</span>`
+      }
+
+      const buttons = SCHEDULE_CONFIRMATION_DOCTOR_IDS.map((doctorId) => {
+        const doctor = getDoctor(doctorId)
+        if (!doctor || !doctor.active) return ''
+
+        const confirmed = isScheduleConfirmed(weekStartDate, doctorId)
+        const buttonClass = confirmed ? 'btn primary' : 'btn'
+        const label = confirmed
+          ? '✅ 확인'
+          : escapeHtml(doctor.name)
+
+        return `<button class="${buttonClass}" type="button" style="padding:6px 8px;font-size:11px;" title="${escapeHtml(doctor.name)}" onclick="toggleWeeklyScheduleConfirmation('${weekStartDate}', '${doctorId}')">${label}</button>`
+      }).join('')
+
+      return `<div style="display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap;">${buttons}</div>`
+    }
+
+    async function toggleWeeklyScheduleConfirmation(weekStartDate, doctorId) {
+      const confirmation = {
+        id: `${weekStartDate}-${doctorId}`,
+        weekStartDate,
+        doctorId,
+        confirmedAt: new Date().toISOString(),
+      }
+      const currentlyConfirmed = isScheduleConfirmed(weekStartDate, doctorId)
+      const withoutCurrentConfirmation = (confirmations) => (confirmations || []).filter((item) => (
+        item.id !== confirmation.id && !(item.weekStartDate === weekStartDate && item.doctorId === doctorId)
+      ))
+
+      state.scheduleConfirmations = currentlyConfirmed
+        ? withoutCurrentConfirmation(state.scheduleConfirmations)
+        : mergeScheduleConfirmations([
+            ...(state.scheduleConfirmations || []),
+            confirmation,
+          ])
+
+      saveState()
+      renderAll()
+
+      await loadScheduleConfirmationsFromSupabase({ render: false })
+      state.scheduleConfirmations = currentlyConfirmed
+        ? withoutCurrentConfirmation(state.scheduleConfirmations)
+        : mergeScheduleConfirmations([
+            ...(state.scheduleConfirmations || []),
+            confirmation,
+          ])
+      saveState()
+      renderScheduleTable()
+
+      const saved = await saveScheduleConfirmationsToSupabase()
+      setSyncStatus(
+        saved ? '스케쥴 확인 동기화 완료' : '스케쥴 확인 변경 실패',
+        saved ? 'green' : 'red'
+      )
     }
 
     async function generateMonthSchedule(showAlert = true) {
@@ -4563,6 +4733,7 @@
       const scheduleCheckCells = []
       const changeHistoryCells = []
       const memoCells = []
+      const scheduleConfirmationCells = []
       const timetableCells = []
       let weekStartIndex = 0
 
@@ -4625,6 +4796,12 @@
           </td>
         `)
 
+        scheduleConfirmationCells.push(`
+          <td colspan="${weekDates.length}" class="schedule-check-cell ${weekClass}">
+            ${renderScheduleConfirmationList(weekDates)}
+          </td>
+        `)
+
         timetableCells.push(`
           <td colspan="${weekDates.length}" class="schedule-check-cell ${bottomWeekClass}">
             <button class="btn" type="button" style="padding:6px 10px;font-size:11px;" onclick="openWeeklyTimetableModal('${getWeekStartDate(weekDates[0])}')">주간 스케쥴표 생성</button>
@@ -4637,6 +4814,7 @@
       const scheduleCheckRow = scheduleCheckCells.join('')
       const changeHistoryRow = changeHistoryCells.join('')
       const memoRow = memoCells.join('')
+      const scheduleConfirmationRow = scheduleConfirmationCells.join('')
       const timetableRow = timetableCells.join('')
 
       table.innerHTML = `
@@ -4664,6 +4842,10 @@
         <tr>
           <td>메모</td>
           ${memoRow}
+        </tr>
+        <tr>
+          <td>스케쥴 확인</td>
+          ${scheduleConfirmationRow}
         </tr>
         <tr>
           <td>주간 스케쥴표</td>
@@ -5281,7 +5463,12 @@
     window.addEventListener('resize', handleResponsiveScheduleViewChange)
     window.addEventListener('orientationchange', handleResponsiveScheduleViewChange)
     window.setInterval(updateViewToCurrentWeekIfWeekChanged, 60000)
+    window.setInterval(() => {
+      if (document.hidden) return
+      loadScheduleConfirmationsFromSupabase({ render: true })
+    }, 15000)
 
+    subscribeScheduleConfirmationsRealtime()
     initializeApp()  
   </script>
 </body>
