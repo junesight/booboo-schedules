@@ -1001,7 +1001,7 @@
             <h2 class="section-title">빠른 작업</h2>
             <div class="list">
               <button class="btn primary" onclick="showTab('schedule')">월간 진료표 보기</button>
-              <div class="alert yellow">퇴근시간 8/7/6/5/4/2와 휴무는 월간 진료표의 각 칸을 클릭해서 바로 수정합니다.</div>
+              <div class="alert yellow">퇴근시간 12/8/7/6/5/4/2와 휴무는 월간 진료표의 각 칸을 클릭해서 바로 수정합니다.</div>
             </div>
           </div>
         </div>
@@ -1234,6 +1234,7 @@
       <div id="workTimeBox" class="field" style="display:none;">
         <label>퇴근 시간</label>
         <div id="workTimeList" class="toolbar-left">
+          <button class="btn" type="button" onclick="applyWorkTime('12')">12시</button>
           <button class="btn" type="button" onclick="applyWorkTime('2')">2시</button>
           <button class="btn" type="button" onclick="applyWorkTime('4')">4시</button>
           <button class="btn" type="button" onclick="applyWorkTime('5')">5시</button>
@@ -3073,6 +3074,7 @@
 
     function getShiftStatusColor(status) {
       const colors = {
+        '12': { bg: '#e0f2fe', strong: '#bae6fd', border: '#0284c7', text: '#075985' },
         '8': { bg: '#e5e7eb', strong: '#111827', border: '#111827', text: '#ffffff' },
         '7': { bg: '#dcfce7', strong: '#bbf7d0', border: '#22c55e', text: '#14532d' },
         '6': { bg: '#fef3c7', strong: '#fde68a', border: '#f59e0b', text: '#92400e' },
@@ -3129,7 +3131,7 @@
     }
 
     function isWorkingStatus(status) {
-      return ['8', '7', '6', '5', '4', '2'].includes(String(status))
+      return ['12', '8', '7', '6', '5', '4', '2'].includes(String(status))
     }
 
     function isPublicHoliday(date) {
@@ -4125,6 +4127,7 @@
     function getFixedScheduleOptions(selectedStatus) {
       const statuses = [
         { value: '', label: '휴무' },
+        { value: '12', label: '12' },
         { value: '8', label: '8' },
         { value: '7', label: '7' },
         { value: '6', label: '6' },
@@ -4679,6 +4682,7 @@
           if (!shift) return `<td class="${weekClass}">-</td>`
 
           const classMap = {
+            '12': 'time',
             '8': 'time late',
             '7': 'time',
             '6': 'time',
