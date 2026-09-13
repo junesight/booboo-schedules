@@ -1576,6 +1576,86 @@
     const CLINIC_CLOSED_FIXED_MONTH_DAYS = ['05-05', '12-25']
     const CLINIC_CLOSED_HOLIDAY_NAME_PATTERNS = ['설날', '설연휴', '설날 연휴', '추석', 'Seollal', 'Korean New Year', 'Chuseok']
 
+    const DEFAULT_HOLIDAY_TYPE_MAP = {
+      // 2024
+      '2024-02-09': 'SEOLLAL', '2024-02-10': 'SEOLLAL', '2024-02-11': 'SEOLLAL', '2024-02-12': 'SEOLLAL',
+      '2024-09-16': 'CHUSEOK', '2024-09-17': 'CHUSEOK', '2024-09-18': 'CHUSEOK',
+      // 2025
+      '2025-01-28': 'SEOLLAL', '2025-01-29': 'SEOLLAL', '2025-01-30': 'SEOLLAL',
+      '2025-10-05': 'CHUSEOK', '2025-10-06': 'CHUSEOK', '2025-10-07': 'CHUSEOK', '2025-10-08': 'CHUSEOK',
+      // 2026
+      '2026-02-16': 'SEOLLAL', '2026-02-17': 'SEOLLAL', '2026-02-18': 'SEOLLAL',
+      '2026-09-24': 'CHUSEOK', '2026-09-25': 'CHUSEOK', '2026-09-26': 'CHUSEOK',
+      // 2027
+      '2027-02-06': 'SEOLLAL', '2027-02-07': 'SEOLLAL', '2027-02-08': 'SEOLLAL', '2027-02-09': 'SEOLLAL',
+      '2027-09-14': 'CHUSEOK', '2027-09-15': 'CHUSEOK', '2027-09-16': 'CHUSEOK',
+      // 2028
+      '2028-01-26': 'SEOLLAL', '2028-01-27': 'SEOLLAL', '2028-01-28': 'SEOLLAL',
+      '2028-10-02': 'CHUSEOK', '2028-10-03': 'CHUSEOK', '2028-10-04': 'CHUSEOK',
+      // 2029
+      '2029-02-12': 'SEOLLAL', '2029-02-13': 'SEOLLAL', '2029-02-14': 'SEOLLAL',
+      '2029-09-21': 'CHUSEOK', '2029-09-22': 'CHUSEOK', '2029-09-23': 'CHUSEOK',
+      // 2030
+      '2030-02-02': 'SEOLLAL', '2030-02-03': 'SEOLLAL', '2030-02-04': 'SEOLLAL',
+      '2030-09-11': 'CHUSEOK', '2030-09-12': 'CHUSEOK', '2030-09-13': 'CHUSEOK',
+    }
+
+    function getMergedHolidayType(date) {
+      if (typeof state !== 'undefined' && state && state.holidayTypeMap && state.holidayTypeMap[date]) {
+        return state.holidayTypeMap[date]
+      }
+      if (DEFAULT_HOLIDAY_TYPE_MAP[date]) {
+        return DEFAULT_HOLIDAY_TYPE_MAP[date]
+      }
+      return null
+    }
+
+    function getMergedHolidayLabel(type) {
+      if (type === 'SEOLLAL') {
+        return '설\n명절\n외래\n휴진'
+      }
+      if (type === 'CHUSEOK') {
+        return '추석\n명절\n외래\n휴진'
+      }
+      return '명절\n외래\n휴진'
+    }
+
+    function getWeeklyTimetableHolidayMergedBlocks(dates) {
+      const blocks = []
+      let currentBlock = null
+
+      dates.forEach((date, index) => {
+        const type = getMergedHolidayType(date)
+        if (type) {
+          if (currentBlock && currentBlock.type === type && currentBlock.endIndex === index - 1) {
+            currentBlock.endIndex = index
+            currentBlock.dates.push(date)
+          } else {
+            if (currentBlock) {
+              blocks.push(currentBlock)
+            }
+            currentBlock = {
+              type,
+              startIndex: index,
+              endIndex: index,
+              dates: [date],
+            }
+          }
+        } else {
+          if (currentBlock) {
+            blocks.push(currentBlock)
+            currentBlock = null
+          }
+        }
+      })
+
+      if (currentBlock) {
+        blocks.push(currentBlock)
+      }
+
+      return blocks
+    }
+
     function isClinicClosedHolidayName(name) {
       return CLINIC_CLOSED_HOLIDAY_NAME_PATTERNS.some((pattern) => (
         String(name || '').toLowerCase().includes(pattern.toLowerCase())
@@ -1662,6 +1742,7 @@
       targetDoctorCount: 4,
       publicHolidays: DEFAULT_PUBLIC_HOLIDAYS,
       clinicClosedDates: DEFAULT_CLINIC_CLOSED_DATES,
+      holidayTypeMap: DEFAULT_HOLIDAY_TYPE_MAP,
       doctors: [
         {
           id: 'choi',
@@ -1852,6 +1933,7 @@
     state.weeklyMemos = state.weeklyMemos || []
     state.scheduleConfirmations = state.scheduleConfirmations || []
     state.clinicClosedDates = state.clinicClosedDates || DEFAULT_CLINIC_CLOSED_DATES
+    state.holidayTypeMap = { ...DEFAULT_HOLIDAY_TYPE_MAP, ...(state.holidayTypeMap || {}) }
     state.doctorManageMode = false
     state.editingDoctorId = null
     state.activeExtraAccrualDoctorId = state.activeExtraAccrualDoctorId || null
@@ -2057,8 +2139,22 @@
             ))
             .map((holiday) => holiday.date)
             .filter(Boolean)
+          const supabaseHolidayTypeMap = {}
+          holidaysResult.data.forEach((holiday) => {
+            const name = String(holiday.name || '')
+            if (name.includes('추석') || name.toLowerCase().includes('chuseok')) {
+              supabaseHolidayTypeMap[holiday.date] = 'CHUSEOK'
+            } else if (name.includes('설') || name.toLowerCase().includes('seollal') || name.toLowerCase().includes('lunar new year')) {
+              supabaseHolidayTypeMap[holiday.date] = 'SEOLLAL'
+            }
+          })
           state.publicHolidays = [...new Set([...DEFAULT_PUBLIC_HOLIDAYS, ...supabaseHolidays])]
           state.clinicClosedDates = [...new Set([...(state.clinicClosedDates || []), ...DEFAULT_CLINIC_CLOSED_DATES, ...supabaseClinicClosedDates])]
+          state.holidayTypeMap = {
+            ...DEFAULT_HOLIDAY_TYPE_MAP,
+            ...(state.holidayTypeMap || {}),
+            ...supabaseHolidayTypeMap,
+          }
         }
 
         if (Array.isArray(fixedSchedulesResult.data) && fixedSchedulesResult.data.length > 0) {
@@ -2865,12 +2961,16 @@
       const tableRight = dayStartX + dayWidth * 7
       const tableBottom = rowY + rowHeight * doctors.length
 
+      const mergedBlocks = getWeeklyTimetableHolidayMergedBlocks(dates)
+      const mergedDateSet = new Set(mergedBlocks.flatMap((block) => block.dates))
+
       ctx.save()
       ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0)
       ctx.clearRect(0, 0, size, size)
       ctx.fillStyle = '#ffffff'
       ctx.fillRect(0, 0, size, size)
 
+      // Title Bar
       ctx.fillStyle = '#fff200'
       ctx.fillRect(0, 0, size, titleHeight)
       drawSpacedTextInBox(ctx, '의료진 진료 시간표', 0, 8, size, titleHeight - 8, {
@@ -2879,13 +2979,14 @@
         strokeWidth: 0.9,
       })
 
+      // Subtitle
       drawTextInBox(ctx, `${formatTimetableDate(weekStartDate)} ~ ${formatTimetableShortDate(weekEndDate)}`, 70, 132, 250, headerHeight, {
         font: '900 30px sans-serif',
       })
 
+      // Header: Day Labels
       ctx.strokeStyle = '#000000'
       ctx.lineWidth = 2
-
       dates.forEach((date, index) => {
         const x = dayStartX + dayWidth * index
         const day = getDayNumber(date)
@@ -2899,6 +3000,7 @@
         })
       })
 
+      // Pass 1: Doctors & Cells Background & Text
       doctors.forEach((doctor, doctorIndex) => {
         const y = rowY + rowHeight * doctorIndex
         const doctorColor = WEEKLY_TIMETABLE_DOCTOR_COLORS[doctor.id] || getDoctorColor(doctor.id).strong
@@ -2925,6 +3027,8 @@
         })
 
         dates.forEach((date, dateIndex) => {
+          if (mergedDateSet.has(date)) return
+
           const x = dayStartX + dayWidth * dateIndex
           const shift = getShift(doctor.id, date)
           const status = shift?.status
@@ -2954,18 +3058,38 @@
               })
             }
           }
-
-          ctx.strokeStyle = '#555555'
-          ctx.lineWidth = 1
-          ctx.strokeRect(x, y, dayWidth, rowHeight)
-          ctx.beginPath()
-          ctx.moveTo(x, y + morningRowHeight)
-          ctx.lineTo(x + dayWidth, y + morningRowHeight)
-          ctx.stroke()
         })
+      })
 
-        ctx.strokeStyle = '#555555'
-        ctx.lineWidth = 1
+      // Pass 2: Merged Holiday Blocks (Background & Text)
+      mergedBlocks.forEach((block) => {
+        const blockX = dayStartX + dayWidth * block.startIndex
+        const blockWidth = dayWidth * (block.endIndex - block.startIndex + 1)
+        const blockY = rowY
+        const blockHeight = rowHeight * doctors.length
+
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(blockX, blockY, blockWidth, blockHeight)
+
+        const label = getMergedHolidayLabel(block.type)
+        const fontSize = Math.min(84, Math.max(32, Math.round(blockWidth * 0.3)))
+        const lineHeight = Math.round(fontSize * 1.75)
+
+        drawTextInBox(ctx, label, blockX, blockY, blockWidth, blockHeight, {
+          font: `900 ${fontSize}px sans-serif`,
+          color: '#dc2626',
+          strokeWidth: 1.2,
+          lineHeight,
+        })
+      })
+
+      // Pass 3: Grid Lines (Clean, Solid & Sharp)
+      ctx.strokeStyle = '#444444'
+      ctx.lineWidth = 1.5
+
+      // Left Column Borders (Photo, Name, Session)
+      doctors.forEach((_, doctorIndex) => {
+        const y = rowY + rowHeight * doctorIndex
         ctx.strokeRect(gridX, y, photoWidth, rowHeight)
         ctx.strokeRect(gridX + photoWidth, y, nameWidth, rowHeight)
         ctx.strokeRect(gridX + photoWidth + nameWidth, y, sessionWidth, rowHeight)
@@ -2973,10 +3097,59 @@
         ctx.moveTo(gridX + photoWidth + nameWidth, y + morningRowHeight)
         ctx.lineTo(gridX + photoWidth + nameWidth + sessionWidth, y + morningRowHeight)
         ctx.stroke()
-
-        drawThickLine(ctx, gridX, y, tableRight, y)
       })
 
+      // Horizontal Row Lines across days
+      doctors.forEach((_, doctorIndex) => {
+        const y = rowY + rowHeight * doctorIndex
+
+        // Morning/Afternoon inner divider per day
+        dates.forEach((date, dateIndex) => {
+          if (mergedDateSet.has(date)) return
+          const x = dayStartX + dayWidth * dateIndex
+          ctx.beginPath()
+          ctx.moveTo(x, y + morningRowHeight)
+          ctx.lineTo(x + dayWidth, y + morningRowHeight)
+          ctx.stroke()
+        })
+
+        // Doctor row bottom horizontal line across non-merged days
+        if (doctorIndex < doctors.length - 1) {
+          const nextY = y + rowHeight
+          dates.forEach((date, dateIndex) => {
+            if (mergedDateSet.has(date)) return
+            const x = dayStartX + dayWidth * dateIndex
+            ctx.beginPath()
+            ctx.moveTo(x, nextY)
+            ctx.lineTo(x + dayWidth, nextY)
+            ctx.stroke()
+          })
+        }
+      })
+
+      // Vertical Column Lines between all days (Mon|Tue|Wed|Thu|Fri|Sat|Sun)
+      for (let i = 0; i <= 7; i++) {
+        const x = dayStartX + dayWidth * i
+        const isInsideMergedBlock = mergedBlocks.some((b) => i > b.startIndex && i <= b.endIndex)
+
+        if (!isInsideMergedBlock) {
+          ctx.beginPath()
+          ctx.moveTo(x, rowY)
+          ctx.lineTo(x, tableBottom)
+          ctx.stroke()
+        }
+      }
+
+      // Merged Block Outer Border
+      mergedBlocks.forEach((block) => {
+        const blockX = dayStartX + dayWidth * block.startIndex
+        const blockWidth = dayWidth * (block.endIndex - block.startIndex + 1)
+        const blockY = rowY
+        const blockHeight = rowHeight * doctors.length
+        ctx.strokeRect(blockX, blockY, blockWidth, blockHeight)
+      })
+
+      // Pass 4: Outer Thick Frame Lines
       drawThickLine(ctx, dayStartX, headerY, tableRight, headerY)
       drawThickLine(ctx, dayStartX, headerY + headerHeight, tableRight, headerY + headerHeight)
       drawThickLine(ctx, gridX, rowY, gridX, tableBottom)
@@ -5329,15 +5502,28 @@
           ))
           .map((holiday) => holiday.date)
 
+        const apiHolidayTypeMap = {}
+        holidays.forEach((holiday) => {
+          const localName = String(holiday.localName || '')
+          const name = String(holiday.name || '')
+          if (localName.includes('추석') || name.toLowerCase().includes('chuseok')) {
+            apiHolidayTypeMap[holiday.date] = 'CHUSEOK'
+          } else if (localName.includes('설') || name.toLowerCase().includes('seollal') || name.toLowerCase().includes('lunar new year')) {
+            apiHolidayTypeMap[holiday.date] = 'SEOLLAL'
+          }
+        })
+
         return {
           holidays: [...new Set([...fallbackHolidays, ...apiHolidays])],
           clinicClosedDates: [...new Set([...fallbackClinicClosedDates, ...apiClinicClosedDates])],
+          holidayTypeMap: apiHolidayTypeMap,
         }
       } catch (error) {
         console.warn('공휴일 API를 불러오지 못해 기본 공휴일 목록을 사용합니다.', error)
         return {
           holidays: fallbackHolidays,
           clinicClosedDates: fallbackClinicClosedDates,
+          holidayTypeMap: {},
         }
       }
     }
@@ -5352,6 +5538,11 @@
 
       state.publicHolidays = [...new Set([...(state.publicHolidays || []), ...holidayResults.flatMap((result) => result.holidays)])]
       state.clinicClosedDates = [...new Set([...(state.clinicClosedDates || []), ...DEFAULT_CLINIC_CLOSED_DATES, ...holidayResults.flatMap((result) => result.clinicClosedDates)])]
+      state.holidayTypeMap = {
+        ...DEFAULT_HOLIDAY_TYPE_MAP,
+        ...(state.holidayTypeMap || {}),
+        ...Object.assign({}, ...holidayResults.map((result) => result.holidayTypeMap || {})),
+      }
       saveState()
     }
 
