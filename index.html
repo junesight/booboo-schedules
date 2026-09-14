@@ -74,6 +74,17 @@
 <meta name="twitter:image" content="https://junesight.github.io/booboo-schedules/og-image-00s2u9yj.png"/>
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2032%2032'%3E%3Ctext%20x%3D'16'%20y%3D'24'%20text-anchor%3D'middle'%20font-size%3D'26'%3E%F0%9F%8F%A5%3C%2Ftext%3E%3C%2Fsvg%3E"/>
 <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    .in-portal .sidebar { display: none !important; }
+    .in-portal .app { display: block !important; width: 100% !important; grid-template-columns: 1fr !important; }
+    .in-portal .main { padding: 20px 24px !important; width: 100% !important; box-sizing: border-box !important; }
+  </style>
+  <script>
+    if (window.self !== window.top) {
+      document.documentElement.classList.add('in-portal');
+    }
+  </script>
 </head><body><!doctype html>
 <html lang="ko">
 <head>
@@ -5667,4 +5678,20 @@
     initializeApp()  
   </script>
 </body>
-</html></body></html>
+</html></body>
+<script>
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.action === 'showTab' && typeof showTab === 'function') {
+      showTab(e.data.tab);
+    }
+  });
+  window.addEventListener('hashchange', function() {
+    var h = window.location.hash.replace('#', '');
+    if (h && typeof showTab === 'function') showTab(h);
+  });
+  window.addEventListener('DOMContentLoaded', function() {
+    var h = window.location.hash.replace('#', '');
+    if (h && typeof showTab === 'function') showTab(h);
+  });
+</script>
+</html>
