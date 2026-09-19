@@ -1438,7 +1438,6 @@
     const LAST_SAVE_TIME_KEY = 'bubu-doctor-schedule-v01-last-save-time'
     const UNSAVED_CHANGES_KEY = 'bubu-doctor-schedule-v01-unsaved-changes'
     const CLEANUP_WRONG_SWAP_2026_05_23_KEY = 'bubu-cleanup-wrong-swap-2026-05-23'
-    const CLEANUP_WRONG_SWAP_2026_09_23_KEY = 'bubu-cleanup-wrong-swap-2026-09-23-v1'
     const CLEANUP_CURRENT_CHANGE_HISTORY_KEY = 'bubu-cleanup-current-change-history-2026-05-23'
     const SUPABASE_URL = 'https://wfyuxxskwlczoyisdcmy.supabase.co'
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_yUeE6ynEpbR3Eq-k3Gv1Ew_1DiaJHjz'
@@ -1960,7 +1959,6 @@
 
     lastSyncedState = loadLastSyncedState()
     cleanupWrongSwapHistoryForMay23()
-    cleanupWrongSwapHistoryForSep23()
     cleanupCurrentChangeHistory()
 
     function loadState() {
@@ -2002,59 +2000,6 @@
       }
 
       safeSetItem(CLEANUP_WRONG_SWAP_2026_05_23_KEY, 'done')
-    }
-
-    function cleanupWrongSwapHistoryForSep23(force = false) {
-      if (!force && safeGetItem(CLEANUP_WRONG_SWAP_2026_09_23_KEY)) return false
-
-      const removeSep23Swap = (snapshot) => {
-        if (!snapshot) return false
-        let modified = false
-
-        if (Array.isArray(snapshot.swaps)) {
-          const beforeCount = snapshot.swaps.length
-          snapshot.swaps = snapshot.swaps.filter((swap) => {
-            const isSep23 = swap.requesterDate === '2026-09-23' || swap.partnerDate === '2026-09-23'
-            const isHwangAndKim = (
-              (swap.requesterId === 'hwang' && swap.partnerId === 'kim-jun') ||
-              (swap.requesterId === 'kim-jun' && swap.partnerId === 'hwang')
-            )
-            return !(isSep23 && isHwangAndKim)
-          })
-          if (snapshot.swaps.length !== beforeCount) modified = true
-        }
-
-        if (Array.isArray(snapshot.shifts)) {
-          const hwangShift = snapshot.shifts.find((s) => s.doctorId === 'hwang' && s.date === '2026-09-23')
-          if (hwangShift && (hwangShift.source === '스왑반영' || hwangShift.status === '휴무')) {
-            hwangShift.status = '7'
-            hwangShift.source = '기본생성'
-            hwangShift.memo = ''
-            modified = true
-          }
-
-          const kimShift = snapshot.shifts.find((s) => s.doctorId === 'kim-jun' && s.date === '2026-09-23')
-          if (kimShift && (kimShift.source === '스왑반영' || kimShift.status === '7')) {
-            kimShift.status = '휴무'
-            kimShift.source = '기본생성'
-            kimShift.memo = ''
-            modified = true
-          }
-        }
-
-        return modified
-      }
-
-      const changedState = removeSep23Swap(state)
-      const changedLastSyncedState = removeSep23Swap(lastSyncedState)
-
-      if (changedState) saveState()
-      if (changedLastSyncedState) {
-        safeSetItem(LAST_SYNC_STORAGE_KEY, JSON.stringify(lastSyncedState))
-      }
-
-      safeSetItem(CLEANUP_WRONG_SWAP_2026_09_23_KEY, 'done')
-      return changedState || changedLastSyncedState
     }
 
     function cleanupCurrentChangeHistory() {
@@ -5691,20 +5636,16 @@
         const loadedFromSupabase = await loadDataFromSupabase()
         await loadPublicHolidaysForVisibleDates()
 
-        const cleanedSep23 = cleanupWrongSwapHistoryForSep23(true)
         const generatedAfterSync = ensureVisibleSchedule()
         const repairedAfterSync = repairVisibleScheduleIfEmpty()
         normalizePublicHolidayShiftsForVisibleDates()
 
-        if (loadedFromSupabase || generatedAfterSync || repairedAfterSync || cleanedSep23) {
+        if (loadedFromSupabase || generatedAfterSync || repairedAfterSync) {
           renderAll()
         }
 
-        if (generatedAfterSync || repairedAfterSync || cleanedSep23) {
+        if (generatedAfterSync || repairedAfterSync) {
           saveSchedulesToSupabase(state.shifts)
-        }
-        if (cleanedSep23) {
-          saveSwapsToSupabase()
         }
 
         setSyncStatus(
