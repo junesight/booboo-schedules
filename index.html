@@ -1,69 +1,7 @@
-<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><script>
-(function(){
-  var __k="0606da88-bbf5-4cb5-926d-59b9ad50f3dd";
-  var __a=null;
-  var __preload=null;
-  if(!__k)return;
-  var _f=window.fetch;
-  // S3 URL → file_key 추출 후 __a 매핑 lookup → assets/ 로컬 경로 치환
-  // 응답에 새 signed URL이 와도 같은 file_key면 같은 assets/ → 영구 작동
-  function patchUrls(data){
-    if(!__a)return data;
-    try{
-      var s=JSON.stringify(data);
-      // 응답 안의 모든 S3 URL을 정규식으로 찾고, file_key 추출 → 매핑 lookup
-      s=s.replace(/https:\/\/prod-files-secure\.s3\.amazonaws\.com\/[^"\s<>]+/g,function(url){
-        var m=url.match(/\.amazonaws\.com\/([^?\\]+)/);
-        if(!m)return url;
-        var key=m[1].replace(/\\u002F/g,"/");
-        return __a[key]||url;
-      });
-      return JSON.parse(s);
-    }catch(e){return data;}
-  }
-  function callMisiso(method,path,body){
-    return _f("https://misiso.com/api/notion/deploy-proxy",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({deployKey:__k,path:path,method:method,body:body})
-    }).then(function(r){
-      var status=r.status;
-      return r.json().then(function(data){return {status:status,data:patchUrls(data)};});
-    });
-  }
-  // preload pattern — 페이지 로드와 병렬로 정적 fetch 호출 미리 시작
-  var __preloadCache={};
-  if(__preload){
-    for(var i=0;i<__preload.length;i++){
-      (function(c){
-        var key=c.method+":"+c.path+":"+(c.body?JSON.stringify(c.body):"");
-        __preloadCache[key]=callMisiso(c.method,c.path,c.body);
-      })(__preload[i]);
-    }
-  }
-  window.fetch=function(url,opts){
-    var u=typeof url==="string"?url:String(url);
-    if(!u.startsWith("/api/notion/"))return _f.apply(this,arguments);
-    var path=u.slice("/api/notion".length);
-    var method=(opts&&opts.method)||"GET";
-    var body;
-    try{body=opts&&opts.body?JSON.parse(opts.body):undefined;}catch(e){body=opts&&opts.body;}
-    var ck=method+":"+path+":"+(body?JSON.stringify(body):"");
-    var promise=__preloadCache[ck];
-    if(promise){delete __preloadCache[ck];}
-    else{promise=callMisiso(method,path,body);}
-    return promise.then(function(res){
-      return new Response(JSON.stringify(res.data),{
-        status:res.status,
-        headers:{"Content-Type":"application/json"}
-      });
-    });
-  };
-})();
-</script>
+<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="preconnect" href="https://misiso.com" crossorigin/>
+
 <meta property="og:type" content="website"/>
 <meta property="og:title" content="목포 부부한의원 의료진 스케쥴 및 근태관리"/>
 <title>목포 부부한의원 의료진 스케쥴 및 근태관리</title>
@@ -1033,6 +971,7 @@
               </div>
             </div>
             <div class="toolbar-right">
+              <button class="btn" type="button" onclick="refreshSchedulePage()">새로고침</button>
               <button class="btn primary" onclick="openFixedScheduleModal()">고정스케쥴 변경</button>
             </div>
           </div>
@@ -1908,6 +1847,13 @@
       return false
     }
 
+    function refreshSchedulePage() {
+      if (hasUnsavedChanges() && !window.confirm('저장하지 않은 변경사항이 있습니다. 새로고침하면 서버 데이터를 다시 불러옵니다. 계속하시겠습니까?')) {
+        return
+      }
+      window.location.reload()
+    }
+
     function safeGetItem(key) {
       try {
         return window.localStorage.getItem(key)
@@ -2422,6 +2368,13 @@
       }
     }
 
+    const CONFIRMATION_FALLBACK_INTERVAL_MS = 15000
+    const CONFIRMATION_AUDIT_INTERVAL_MS = 5 * 60 * 1000
+    let confirmationsRealtimeConnected = false
+    let confirmationsLastCheckedAt = 0
+    let confirmationsRefreshInFlight = false
+    let confirmationsRefreshPending = false
+
     async function loadScheduleConfirmationsFromSupabase({ render = true } = {}) {
       try {
         const { data, error } = await db
@@ -2431,6 +2384,8 @@
           .limit(1)
 
         if (error) throw error
+
+        confirmationsLastCheckedAt = Date.now()
 
         const value = data?.[0]?.value
         if (!value) return true
@@ -2451,6 +2406,34 @@
       }
     }
 
+    async function refreshScheduleConfirmations() {
+      if (document.hidden || navigator.onLine === false) return
+      if (confirmationsRefreshInFlight) {
+        // A change arriving during a fetch still needs a subsequent fresh read.
+        confirmationsRefreshPending = true
+        return
+      }
+
+      confirmationsRefreshInFlight = true
+      try {
+        do {
+          confirmationsRefreshPending = false
+          await loadScheduleConfirmationsFromSupabase({ render: true })
+        } while (confirmationsRefreshPending && !document.hidden && navigator.onLine !== false)
+      } finally {
+        confirmationsRefreshInFlight = false
+      }
+    }
+
+    function checkScheduleConfirmationsIfNeeded() {
+      const interval = confirmationsRealtimeConnected
+        ? CONFIRMATION_AUDIT_INTERVAL_MS
+        : CONFIRMATION_FALLBACK_INTERVAL_MS
+      if (Date.now() - confirmationsLastCheckedAt >= interval) {
+        refreshScheduleConfirmations()
+      }
+    }
+
     function subscribeScheduleConfirmationsRealtime() {
       try {
         db
@@ -2461,10 +2444,17 @@
             table: 'settings',
             filter: 'key=eq.scheduleConfirmations',
           }, () => {
-            loadScheduleConfirmationsFromSupabase({ render: true })
+            refreshScheduleConfirmations()
           })
-          .subscribe()
+          .subscribe((status) => {
+            confirmationsRealtimeConnected = status === 'SUBSCRIBED'
+            if (confirmationsRealtimeConnected) {
+              // Also catch changes missed before joining or during reconnect.
+              refreshScheduleConfirmations()
+            }
+          })
       } catch (error) {
+        confirmationsRealtimeConnected = false
         console.warn('스케쥴 확인 실시간 구독을 시작하지 못했습니다.', error)
       }
     }
@@ -5669,10 +5659,11 @@
     window.addEventListener('resize', handleResponsiveScheduleViewChange)
     window.addEventListener('orientationchange', handleResponsiveScheduleViewChange)
     window.setInterval(updateViewToCurrentWeekIfWeekChanged, 60000)
-    window.setInterval(() => {
-      if (document.hidden) return
-      loadScheduleConfirmationsFromSupabase({ render: true })
-    }, 15000)
+    window.setInterval(checkScheduleConfirmationsIfNeeded, CONFIRMATION_FALLBACK_INTERVAL_MS)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshScheduleConfirmations()
+    })
+    window.addEventListener('online', refreshScheduleConfirmations)
 
     subscribeScheduleConfirmationsRealtime()
     initializeApp()  
