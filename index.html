@@ -2016,13 +2016,45 @@
         .filter(Boolean)
     }
 
-    async function loadDataFromSupabase() {
+    const loadedScheduleDates = new Set()
+    let initialScheduleLoaded = false
+    let scheduleLoadQueue = Promise.resolve()
+
+    function rememberLoadedScheduleDates(startDate, endDate) {
+      for (let date = startDate; date <= endDate; date = addDays(date, 1)) {
+        loadedScheduleDates.add(date)
+      }
+    }
+
+    async function loadMissingVisibleSchedules() {
+      if (!initialScheduleLoaded && !(await loadDataFromSupabase())) return false
+      const missingDates = getVisibleDates().filter((date) => (
+        date >= SCHEDULE_DATA_START_DATE && !loadedScheduleDates.has(date)
+      ))
+      if (!missingDates.length) return true
+      let startDate = missingDates[0]
+      let endDate = startDate
+      for (const date of missingDates.slice(1)) {
+        if (date !== addDays(endDate, 1)) {
+          if (!(await loadDataFromSupabase({ startDate, endDate, schedulesOnly: true }))) return false
+          startDate = date
+        }
+        endDate = date
+      }
+      return loadDataFromSupabase({ startDate, endDate, schedulesOnly: true })
+    }
+
+    async function loadDataFromSupabase({ startDate, endDate, schedulesOnly = false } = {}) {
       try {
         const visibleDates = getVisibleDates()
-        const scheduleStartDate = visibleDates[0] < SCHEDULE_DATA_START_DATE
+        const requestedStart = startDate || (initialScheduleLoaded ? visibleDates[0] : getCurrentWeekStart())
+        const scheduleStartDate = requestedStart < SCHEDULE_DATA_START_DATE
           ? SCHEDULE_DATA_START_DATE
-          : visibleDates[0]
-        const scheduleEndDate = visibleDates[visibleDates.length - 1]
+          : requestedStart
+        const scheduleEndDate = endDate || (initialScheduleLoaded
+          ? visibleDates[visibleDates.length - 1]
+          : addDays(getCurrentWeekStart(), 55))
+        const skippedResult = { data: null, error: null }
         const [
           doctorsResult,
           schedulesResult,
@@ -2031,12 +2063,12 @@
           fixedSchedulesResult,
           settingsResult,
         ] = await Promise.all([
-          db.from('doctors').select('*').order('doctor_id'),
+          schedulesOnly ? skippedResult : db.from('doctors').select('*').order('doctor_id'),
           db.from('schedules').select('*').gte('date', scheduleStartDate).lte('date', scheduleEndDate),
-          db.from('schedules').select('*').gte('date', SCHEDULE_DATA_START_DATE).eq('status', '연차사용'),
-          db.from('holidays').select('*'),
-          db.from('fixed_schedules').select('*'),
-          db.from('settings').select('*'),
+          schedulesOnly ? skippedResult : db.from('schedules').select('id,doctor_id,date,status,unit,source,memo').gte('date', SCHEDULE_DATA_START_DATE).eq('status', '연차사용'),
+          schedulesOnly ? skippedResult : db.from('holidays').select('*'),
+          schedulesOnly ? skippedResult : db.from('fixed_schedules').select('*'),
+          schedulesOnly ? skippedResult : db.from('settings').select('*'),
         ])
 
         if (doctorsResult.error) throw doctorsResult.error
@@ -2199,6 +2231,8 @@
           }
         }
 
+        rememberLoadedScheduleDates(scheduleStartDate, scheduleEndDate)
+        initialScheduleLoaded = true
         saveState()
         setLastSyncedState()
         return true
@@ -2639,13 +2673,67 @@
       return loadedFromSupabase
     }
 
+    function stableSaveValue(value) {
+      if (Array.isArray(value)) return value.map(stableSaveValue)
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableSaveValue(value[key])]))
+      }
+      return value
+    }
+
+    function saveValuesEqual(left, right) {
+      return JSON.stringify(stableSaveValue(left)) === JSON.stringify(stableSaveValue(right))
+    }
+
+    function getChangedWeekSavePlan(current, baseline) {
+      const previous = new Map((baseline?.shifts || []).map((shift) => [shift.id, shift]))
+      const next = new Map((current.shifts || []).map((shift) => [shift.id, shift]))
+      const weeks = new Set()
+      const deletedIds = []
+      for (const shift of next.values()) {
+        if (shift.date >= SCHEDULE_DATA_START_DATE && !saveValuesEqual(shift, previous.get(shift.id))) {
+          weeks.add(getWeekStartDate(shift.date))
+        }
+      }
+      for (const shift of previous.values()) {
+        if (shift.date >= SCHEDULE_DATA_START_DATE && !next.has(shift.id)) {
+          weeks.add(getWeekStartDate(shift.date))
+          deletedIds.push(shift.id)
+        }
+      }
+      return {
+        weeks: [...weeks].sort(),
+        shifts: [...next.values()].filter((shift) => (
+          shift.date >= SCHEDULE_DATA_START_DATE && weeks.has(getWeekStartDate(shift.date))
+        )),
+        deletedIds,
+      }
+    }
+
+    async function saveChangedScheduleWeeks(plan) {
+      if (plan.shifts.length && !(await saveSchedulesToSupabase(plan.shifts))) return false
+      try {
+        for (let index = 0; index < plan.deletedIds.length; index += 500) {
+          const { error } = await db.from('schedules').delete().in('id', plan.deletedIds.slice(index, index + 500))
+          if (error) throw error
+        }
+        return true
+      } catch (error) {
+        window.lastSupabaseScheduleSaveError = error.message || String(error)
+        return false
+      }
+    }
+
+    let scheduleSaveInProgress = false
+
     async function uploadCurrentDataToSupabase() {
+      if (scheduleSaveInProgress) return false
       const password = await requestPassword({
         title: '현재 데이터 저장',
         message: '현재 데이터를 저장하려면 비밀번호를 입력해주세요.',
       })
 
-      if (password === null) return false
+      if (password === null || scheduleSaveInProgress) return false
 
       setSyncStatus('Supabase 저장 중...', 'yellow')
 
@@ -2660,64 +2748,61 @@
         return false
       }
 
-      const visibleMonths = [...new Set(visibleDates.map((date) => getMonthKey(date)))]
-
-      for (const month of visibleMonths) {
-        const hasMonthWork = state.shifts.some((shift) => (
-          shift.date.startsWith(month) && isWorkingStatus(shift.status)
-        ))
-
-        if (!hasMonthWork) {
-          generateMonthScheduleForMonth(month)
-        }
-      }
-
-      const visibleGenerated = ensureVisibleSchedule()
-      const visibleRepaired = repairVisibleScheduleIfEmpty()
+      ensureVisibleSchedule()
       normalizePublicHolidayShiftsForVisibleDates()
       saveState()
       renderAll()
 
-      const schedulesToSave = state.shifts.filter((shift) => (
-        shift.date >= SCHEDULE_DATA_START_DATE
-      ))
+      const savedSnapshot = cloneState(state)
+      const baseline = getLastSyncedState()
+      const currentValues = getSavableSnapshot(savedSnapshot)
+      const previousValues = baseline ? getSavableSnapshot(baseline) : {}
+      const plan = getChangedWeekSavePlan(savedSnapshot, baseline)
+      const tasks = [
+        ['fixedScheduleTemplate', () => saveFixedScheduleTemplateToSupabase(savedSnapshot.fixedScheduleTemplate)],
+        ['doctors', saveDoctorsToSupabase],
+        ['extraLeaveAccruals', saveExtraLeaveAccrualsToSupabase],
+        ['weeklyMemos', saveWeeklyMemosToSupabase],
+        ['swaps', saveSwapsToSupabase],
+      ].filter(([key]) => !saveValuesEqual(currentValues[key], previousValues[key]))
 
-      const [scheduleSaved, fixedScheduleSaved, doctorsSaved, extraLeaveAccrualsSaved, weeklyMemosSaved, scheduleConfirmationsSaved, swapsSaved] = await Promise.all([
-        saveSchedulesToSupabase(schedulesToSave),
-        saveFixedScheduleTemplateToSupabase(state.fixedScheduleTemplate),
-        saveDoctorsToSupabase(),
-        saveExtraLeaveAccrualsToSupabase(),
-        saveWeeklyMemosToSupabase(),
-        saveScheduleConfirmationsToSupabase(),
-        saveSwapsToSupabase(),
-      ])
-
-      let lastSaveTimeSaved = false
-      const nextLastSaveTime = new Date().toISOString()
-
-      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved) {
-        lastSaveTimeSaved = await saveLastSaveTimeToSupabase(nextLastSaveTime)
-      }
-
-      if (scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved) {
-        updateLastSaveTime(nextLastSaveTime)
+      if (!plan.weeks.length && !tasks.length) {
         clearUnsavedChanges()
-        setLastSyncedState()
-        await loadDataFromSupabase()
-        renderAll()
+        setSyncStatus('저장할 변경사항 없음', 'green')
+        return true
       }
 
-      setSyncStatus(
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved ? `Supabase 저장·동기화 완료 · ${schedulesToSave.length}개` : '저장 확인 필요',
-        scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved ? 'green' : 'red'
-      )
+      scheduleSaveInProgress = true
+      window.lastSupabaseScheduleSaveError = ''
+      try {
+        const results = await Promise.all([
+          saveChangedScheduleWeeks(plan),
+          ...tasks.map(([, save]) => save()),
+        ])
+        if (results.some((result) => !result)) throw new Error('일부 데이터 저장에 실패했습니다.')
+        const nextLastSaveTime = new Date().toISOString()
+        if (!(await saveLastSaveTimeToSupabase(nextLastSaveTime))) throw new Error('최종 저장 시간 기록에 실패했습니다.')
 
-      alert(scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved
-        ? `현재 변경된 스케쥴 ${schedulesToSave.length}개, 진료의 설정, 고정스케쥴, 추가 발생, 메모, 확인, 스왑 데이터를 Supabase에 저장하고 동기화했습니다.`
-        : `일부 데이터 저장에 실패했습니다.\n${window.lastSupabaseScheduleSaveError || 'Supabase 설정과 권한을 확인해주세요.'}`
-      )
-
-      return scheduleSaved && fixedScheduleSaved && doctorsSaved && extraLeaveAccrualsSaved && weeklyMemosSaved && scheduleConfirmationsSaved && swapsSaved && lastSaveTimeSaved
+        updateLastSaveTime(nextLastSaveTime)
+        // Confirmations are saved independently and may arrive while this save is running.
+        savedSnapshot.scheduleConfirmations = cloneState(state.scheduleConfirmations || [])
+        setLastSyncedState(savedSnapshot)
+        const hasNewChanges = hasMeaningfulUnsavedChanges()
+        if (hasNewChanges) markUnsavedChanges()
+        else clearUnsavedChanges()
+        saveState()
+        renderAll()
+        setSyncStatus(hasNewChanges ? '저장 완료 · 추가 수정 저장 필요' : `저장 완료 · ${plan.weeks.length}주`, hasNewChanges ? 'yellow' : 'green')
+        alert(`변경된 ${plan.weeks.length}주 스케쥴과 수정된 항목을 저장했습니다.`)
+        return !hasNewChanges
+      } catch (error) {
+        markUnsavedChanges()
+        setSyncStatus('저장 확인 필요', 'red')
+        alert(`${error.message}\n${window.lastSupabaseScheduleSaveError || '연결 상태를 확인하고 다시 저장해주세요.'}`)
+        return false
+      } finally {
+        scheduleSaveInProgress = false
+      }
     }
 
     async function resetData() {
@@ -5590,15 +5675,15 @@
         return false
       }
 
-      const visibleMonths = [...new Set(visibleDates.map((date) => getMonthKey(date)))]
       let changed = false
-
-      for (const month of visibleMonths) {
-        const hasMonthSchedule = state.shifts.some((shift) => shift.date.startsWith(month))
-
-        if (!hasMonthSchedule) {
-          generateMonthScheduleForMonth(month)
-          changed = true
+      const template = getFixedScheduleTemplate()
+      for (const date of visibleDates) {
+        if (!loadedScheduleDates.has(date)) continue
+        for (const doctor of getActiveDoctors()) {
+          if (!getShift(doctor.id, date)) {
+            state.shifts.push(createDefaultShift(doctor, date, template))
+            changed = true
+          }
         }
       }
 
@@ -5615,34 +5700,31 @@
 
       pruneOldLocalSchedules()
 
-      const generatedMissingSchedule = ensureVisibleSchedule()
-      const repairedEmptySchedule = repairVisibleScheduleIfEmpty()
-      normalizePublicHolidayShiftsForVisibleDates()
       renderAll()
 
       setSyncStatus('로컬 표시 중', 'yellow')
 
-      ;(async () => {
-        const loadedFromSupabase = await loadDataFromSupabase()
+      scheduleLoadQueue = scheduleLoadQueue.catch(() => {}).then(async () => {
+        const loadedFromSupabase = await loadMissingVisibleSchedules()
+        if (!loadedFromSupabase) {
+          setSyncStatus('로컬 모드 · 조회 재시도 필요', 'red')
+          return
+        }
         await loadPublicHolidaysForVisibleDates()
 
-        const generatedAfterSync = ensureVisibleSchedule()
-        const repairedAfterSync = repairVisibleScheduleIfEmpty()
+        ensureVisibleSchedule()
         normalizePublicHolidayShiftsForVisibleDates()
 
-        if (loadedFromSupabase || generatedAfterSync || repairedAfterSync) {
-          renderAll()
-        }
+        renderAll()
 
-        if (generatedAfterSync || repairedAfterSync) {
-          saveSchedulesToSupabase(state.shifts)
-        }
+        if (safeGetItem(UNSAVED_CHANGES_KEY) !== 'true') setLastSyncedState()
 
         setSyncStatus(
           loadedFromSupabase ? 'Supabase 동기화 완료' : '로컬 모드',
           loadedFromSupabase ? 'green' : 'red'
         )
-      })()
+      })
+      return scheduleLoadQueue
     }
 
     function handleResponsiveScheduleViewChange() {
