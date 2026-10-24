@@ -2402,7 +2402,7 @@
       }
     }
 
-    const CONFIRMATION_FALLBACK_INTERVAL_MS = 15000
+    const CONFIRMATION_FALLBACK_INTERVAL_MS = 2 * 60 * 1000
     const CONFIRMATION_AUDIT_INTERVAL_MS = 5 * 60 * 1000
     let confirmationsRealtimeConnected = false
     let confirmationsLastCheckedAt = 0
@@ -5741,7 +5741,7 @@
     window.addEventListener('resize', handleResponsiveScheduleViewChange)
     window.addEventListener('orientationchange', handleResponsiveScheduleViewChange)
     window.setInterval(updateViewToCurrentWeekIfWeekChanged, 60000)
-    window.setInterval(checkScheduleConfirmationsIfNeeded, CONFIRMATION_FALLBACK_INTERVAL_MS)
+    window.setInterval(checkScheduleConfirmationsIfNeeded, 15000)
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) refreshScheduleConfirmations()
     })
