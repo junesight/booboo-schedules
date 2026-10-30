@@ -1489,6 +1489,7 @@
     }
 
     const DEFAULT_PUBLIC_HOLIDAYS = [
+      // 2026
       '2026-01-01',
       '2026-02-16',
       '2026-02-17',
@@ -1510,9 +1511,32 @@
       '2026-10-05',
       '2026-10-09',
       '2026-12-25',
+      // 2027
+      '2027-01-01',
+      '2027-02-06',
+      '2027-02-07',
+      '2027-02-08',
+      '2027-02-09',
+      '2027-03-01',
+      '2027-05-05',
+      '2027-05-13',
+      '2027-06-06',
+      '2027-07-17',
+      '2027-08-15',
+      '2027-08-16',
+      '2027-09-14',
+      '2027-09-15',
+      '2027-09-16',
+      '2027-10-03',
+      '2027-10-04',
+      '2027-10-09',
+      '2027-10-11',
+      '2027-12-25',
+      '2027-12-27',
     ]
 
     const DEFAULT_CLINIC_CLOSED_DATES = [
+      // 2026
       '2026-02-16',
       '2026-02-17',
       '2026-02-18',
@@ -1521,6 +1545,16 @@
       '2026-09-25',
       '2026-09-26',
       '2026-12-25',
+      // 2027
+      '2027-02-06',
+      '2027-02-07',
+      '2027-02-08',
+      '2027-02-09',
+      '2027-05-05',
+      '2027-09-14',
+      '2027-09-15',
+      '2027-09-16',
+      '2027-12-25',
     ]
 
     const CLINIC_CLOSED_FIXED_MONTH_DAYS = ['05-05', '12-25']
@@ -2137,7 +2171,7 @@
               supabaseHolidayTypeMap[holiday.date] = 'SEOLLAL'
             }
           })
-          state.publicHolidays = [...new Set([...DEFAULT_PUBLIC_HOLIDAYS, ...supabaseHolidays])]
+          state.publicHolidays = [...new Set([...(state.publicHolidays || []), ...DEFAULT_PUBLIC_HOLIDAYS, ...supabaseHolidays])]
           state.clinicClosedDates = [...new Set([...(state.clinicClosedDates || []), ...DEFAULT_CLINIC_CLOSED_DATES, ...supabaseClinicClosedDates])]
           state.holidayTypeMap = {
             ...DEFAULT_HOLIDAY_TYPE_MAP,
